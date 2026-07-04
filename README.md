@@ -29,9 +29,20 @@ make doctor
 ### Install
 
 ```bash
-cp .env.example .env
-make setup
+make quickstart
 make check
+```
+
+`make quickstart` creates `.env` if missing, installs Node and Foundry dependencies, builds contracts, type-checks the CLI, and creates/faucet-funds the default local profiles:
+
+```text
+admin policyAdmin deployer alice bob treasury
+```
+
+To skip faucet funding during profile generation:
+
+```bash
+make quickstart ACCOUNT_ARGS="--no-fund"
 ```
 
 The CLI reads `.env` on startup. Today it uses only:
@@ -106,7 +117,24 @@ At this point:
 
 ## Play With The CLI
 
-Open two terminals.
+Open the default working sessions in separate macOS Terminal windows:
+
+```bash
+make open-sessions
+```
+
+This opens:
+
+```text
+admin
+policyadmin
+alice
+bob
+```
+
+On non-macOS machines, the script prints the commands to run manually.
+
+Or open two terminals yourself.
 
 Terminal 1:
 
