@@ -9,10 +9,9 @@ import {
 } from "../tempo/index.js";
 import {
   nowIso,
-  type Address,
-  type PoliciesState,
   type PolicyRecord,
   type PolicyType,
+  type SimplePolicyType,
 } from "../state/index.js";
 import type { ReplContext } from "../repl/context.js";
 import { recordHistory } from "./history.js";
@@ -39,6 +38,11 @@ export async function handlePolicyCommand(args: string[], context: ReplContext, 
 
   if (subcommand === "create") {
     await createPolicy(rest, context, output);
+    return;
+  }
+
+  if (subcommand === "create-compound") {
+    await createCompoundPolicy(rest, context, output);
     return;
   }
 
@@ -69,6 +73,7 @@ export async function handlePolicyCommand(args: string[], context: ReplContext, 
 function writePolicyHelp(output: Output): void {
   output.write(`Policy commands:
   policy create <name> <whitelist|blacklist> [--admin <profile|address>]
+  policy create-compound <name> --sender <policy|id> --recipient <policy|id> --mint-recipient <policy|id>
   policy list
   policy use <name>
   policy inspect [name]
@@ -91,7 +96,15 @@ function writePolicyList(context: ReplContext, output: Output): void {
 
   for (const policy of records) {
     const activeMarker = policy.name === context.session.activePolicy ? "*" : " ";
-    output.write(`${activeMarker} ${policy.name} id=${policy.id} type=${policy.type} admin=${policy.admin}\n`);
+    output.write(`${activeMarker} ${policy.name} id=${policy.id} type=${policy.type} admin=${policy.admin}`);
+
+    if (policy.compound) {
+      output.write(` sender=${policy.compound.senderPolicyName}:${policy.compound.senderPolicyId}`);
+      output.write(` recipient=${policy.compound.recipientPolicyName}:${policy.compound.recipientPolicyId}`);
+      output.write(` mintRecipient=${policy.compound.mintRecipientPolicyName}:${policy.compound.mintRecipientPolicyId}`);
+    }
+
+    output.write("\n");
   }
 
   if (!context.session.activePolicy) {
@@ -180,6 +193,82 @@ async function createPolicy(args: string[], context: ReplContext, output: Output
   output.write(`tx: ${hash}\n`);
 }
 
+async function createCompoundPolicy(args: string[], context: ReplContext, output: Output): Promise<void> {
+  const active = requireActiveProfile(context);
+  const [name] = args;
+
+  if (!name) {
+    output.write("Usage: policy create-compound <name> --sender <policy|id> --recipient <policy|id> --mint-recipient <policy|id>\n");
+    return;
+  }
+
+  if (context.policies.policies[name]) {
+    throw new Error(`Policy already exists locally: ${name}`);
+  }
+
+  const sender = resolvePolicyComponent(readRequiredOption(args, "--sender"), context);
+  const recipient = resolvePolicyComponent(readRequiredOption(args, "--recipient"), context);
+  const mintRecipient = resolvePolicyComponent(readRequiredOption(args, "--mint-recipient"), context);
+  const walletClient = createTempoWalletClient(active, context.network);
+  const hash = await walletClient.writeContract({
+    address: TIP403_REGISTRY_ADDRESS,
+    abi: tip403RegistryAbi,
+    functionName: "createCompoundPolicy",
+    args: [
+      BigInt(sender.id),
+      BigInt(recipient.id),
+      BigInt(mintRecipient.id),
+    ],
+  });
+
+  const receipt = await context.publicClient.waitForTransactionReceipt({ hash });
+  const policyId = readCompoundPolicyId(receipt.logs);
+  const createdAt = nowIso();
+  const record: PolicyRecord = {
+    name,
+    id: policyId.toString(),
+    type: "compound",
+    admin: "immutable",
+    network: context.network.key,
+    members: {},
+    compound: {
+      senderPolicyName: sender.name,
+      senderPolicyId: sender.id,
+      recipientPolicyName: recipient.name,
+      recipientPolicyId: recipient.id,
+      mintRecipientPolicyName: mintRecipient.name,
+      mintRecipientPolicyId: mintRecipient.id,
+    },
+    createdAt,
+    txHash: hash,
+  };
+
+  context.policies.policies[name] = record;
+  context.policies.updatedAt = createdAt;
+  context.session.activePolicy = name;
+
+  await context.savePolicies(context.policies);
+  await context.saveSession(context.session);
+  await recordHistory(context, {
+    action: "policy create-compound",
+    summary: `created compound policy ${name}`,
+    txs: [{ label: "createCompoundPolicy", hash }],
+    metadata: {
+      policy: name,
+      policyId: record.id,
+      senderPolicyId: sender.id,
+      recipientPolicyId: recipient.id,
+      mintRecipientPolicyId: mintRecipient.id,
+    },
+  });
+
+  output.write(`created compound policy ${name} id=${record.id}\n`);
+  output.write(`sender policy: ${sender.name} id=${sender.id}\n`);
+  output.write(`recipient policy: ${recipient.name} id=${recipient.id}\n`);
+  output.write(`mint recipient policy: ${mintRecipient.name} id=${mintRecipient.id}\n`);
+  output.write(`tx: ${hash}\n`);
+}
+
 async function inspectPolicy(name: string | undefined, context: ReplContext, output: Output): Promise<void> {
   const policy = resolvePolicy(name, context);
   const [policyType, admin] = await context.publicClient.readContract({
@@ -195,6 +284,22 @@ async function inspectPolicy(name: string | undefined, context: ReplContext, out
   output.write(`chain type: ${fromTip403PolicyType(policyType)}\n`);
   output.write(`local admin: ${policy.admin}\n`);
   output.write(`chain admin: ${admin}\n`);
+
+  if (policy.type === "compound" || fromTip403PolicyType(policyType) === "compound") {
+    const [senderPolicyId, recipientPolicyId, mintRecipientPolicyId] = await context.publicClient.readContract({
+      address: TIP403_REGISTRY_ADDRESS,
+      abi: tip403RegistryAbi,
+      functionName: "compoundPolicyData",
+      args: [BigInt(policy.id)],
+    });
+
+    output.write(`sender policy: ${describePolicyComponent(senderPolicyId, context)}\n`);
+    output.write(`recipient policy: ${describePolicyComponent(recipientPolicyId, context)}\n`);
+    output.write(`mint recipient policy: ${describePolicyComponent(mintRecipientPolicyId, context)}\n`);
+    output.write("compound policies are immutable; edit their child policies or create a new compound policy\n");
+    return;
+  }
+
   output.write(`known members: ${Object.keys(policy.members).length}\n`);
 
   for (const member of Object.values(policy.members).sort((left, right) => left.name.localeCompare(right.name))) {
@@ -212,6 +317,36 @@ async function checkPolicy(args: string[], context: ReplContext, output: Output)
 
   const target = resolveAddress(targetArg, context.accounts);
   const policy = resolvePolicy(policyName, context);
+
+  if (policy.type === "compound") {
+    const [senderAllowed, recipientAllowed, mintRecipientAllowed] = await Promise.all([
+      context.publicClient.readContract({
+        address: TIP403_REGISTRY_ADDRESS,
+        abi: tip403RegistryAbi,
+        functionName: "isAuthorizedSender",
+        args: [BigInt(policy.id), target.address],
+      }),
+      context.publicClient.readContract({
+        address: TIP403_REGISTRY_ADDRESS,
+        abi: tip403RegistryAbi,
+        functionName: "isAuthorizedRecipient",
+        args: [BigInt(policy.id), target.address],
+      }),
+      context.publicClient.readContract({
+        address: TIP403_REGISTRY_ADDRESS,
+        abi: tip403RegistryAbi,
+        functionName: "isAuthorizedMintRecipient",
+        args: [BigInt(policy.id), target.address],
+      }),
+    ]);
+
+    output.write(`${target.label} under ${policy.name}\n`);
+    output.write(`sender: ${senderAllowed ? "authorized" : "not authorized"}\n`);
+    output.write(`recipient: ${recipientAllowed ? "authorized" : "not authorized"}\n`);
+    output.write(`mint recipient: ${mintRecipientAllowed ? "authorized" : "not authorized"}\n`);
+    return;
+  }
+
   const allowed = await context.publicClient.readContract({
     address: TIP403_REGISTRY_ADDRESS,
     abi: tip403RegistryAbi,
@@ -237,6 +372,7 @@ async function modifyPolicyMember(
   }
 
   const policy = resolvePolicy(policyName, context);
+  assertSimplePolicy(policy);
   const target = resolveAddress(targetArg, context.accounts);
   const shouldBeIncluded = action === "allow" || action === "block";
   const walletClient = createTempoWalletClient(active, context.network);
@@ -294,6 +430,10 @@ async function setPolicyAdmin(args: string[], context: ReplContext, output: Outp
   }
 
   const policy = resolvePolicy(policyName, context);
+  if (policy.type === "compound") {
+    throw new Error("Compound policies are immutable and have no admin. Edit child policies or create a new compound policy.");
+  }
+
   const admin = resolveAddress(adminArg, context.accounts);
   const walletClient = createTempoWalletClient(active, context.network);
   const hash = await walletClient.writeContract({
@@ -345,12 +485,18 @@ function requirePolicyByName(name: string, context: ReplContext): PolicyRecord {
   return policy;
 }
 
-function parsePolicyType(value: string): PolicyType {
+function parsePolicyType(value: string): SimplePolicyType {
   if (value === "whitelist" || value === "blacklist") {
     return value;
   }
 
   throw new Error(`Invalid policy type "${value}". Use whitelist or blacklist.`);
+}
+
+function assertSimplePolicy(policy: PolicyRecord): asserts policy is PolicyRecord & { type: SimplePolicyType } {
+  if (policy.type === "compound") {
+    throw new Error("Compound policies are immutable. Edit the sender/recipient/mint-recipient child policies, or create a new compound policy.");
+  }
 }
 
 function readOption(args: string[], option: string): string | undefined {
@@ -363,6 +509,80 @@ function readOption(args: string[], option: string): string | undefined {
   return args[index + 1];
 }
 
+function readRequiredOption(args: string[], option: string): string {
+  const value = readOption(args, option);
+
+  if (!value) {
+    throw new Error(`Missing ${option}. Usage: policy create-compound <name> --sender <policy|id> --recipient <policy|id> --mint-recipient <policy|id>`);
+  }
+
+  return value;
+}
+
+interface PolicyComponent {
+  name: string;
+  id: string;
+}
+
+function resolvePolicyComponent(value: string, context: ReplContext): PolicyComponent {
+  const normalized = value.trim();
+  const builtin = resolveBuiltinPolicy(normalized);
+
+  if (builtin) {
+    return builtin;
+  }
+
+  const localPolicy = context.policies.policies[normalized];
+
+  if (!localPolicy) {
+    throw new Error(`Unknown policy component: ${value}. Use a local policy name, 0, 1, always-reject, or always-allow.`);
+  }
+
+  assertSimplePolicy(localPolicy);
+
+  return {
+    name: localPolicy.name,
+    id: localPolicy.id,
+  };
+}
+
+function resolveBuiltinPolicy(value: string): PolicyComponent | undefined {
+  const normalized = value.toLowerCase();
+
+  if (normalized === "0" || normalized === "always-reject" || normalized === "reject") {
+    return {
+      name: "always-reject",
+      id: "0",
+    };
+  }
+
+  if (normalized === "1" || normalized === "always-allow" || normalized === "allow") {
+    return {
+      name: "always-allow",
+      id: "1",
+    };
+  }
+
+  return undefined;
+}
+
+function describePolicyComponent(policyId: bigint, context: ReplContext): string {
+  const id = policyId.toString();
+  const builtin = resolveBuiltinPolicy(id);
+
+  if (builtin) {
+    return `${builtin.name} id=${builtin.id}`;
+  }
+
+  const localPolicy = Object.values(context.policies.policies).find((policy) => policy.id === id);
+
+  if (localPolicy) {
+    return `${localPolicy.name} id=${localPolicy.id} type=${localPolicy.type}`;
+  }
+
+  return `id=${id}`;
+}
+
 function readCreatedPolicyId(logs: readonly Log[]): bigint {
   const events = parseEventLogs({
     abi: tip403RegistryAbi,
@@ -373,6 +593,21 @@ function readCreatedPolicyId(logs: readonly Log[]): bigint {
 
   if (!event) {
     throw new Error("PolicyCreated event was not found in transaction receipt.");
+  }
+
+  return event.args.policyId;
+}
+
+function readCompoundPolicyId(logs: readonly Log[]): bigint {
+  const events = parseEventLogs({
+    abi: tip403RegistryAbi,
+    eventName: "CompoundPolicyCreated",
+    logs: [...logs],
+  });
+  const event = events[0];
+
+  if (!event) {
+    throw new Error("CompoundPolicyCreated event was not found in transaction receipt.");
   }
 
   return event.args.policyId;

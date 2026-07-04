@@ -254,6 +254,27 @@ Side effects:
 - Saves policy id in `.poc/policies.local.json`
 - Sets the policy as active for the session
 
+#### `policy create-compound <name> --sender <policy|id> --recipient <policy|id> --mint-recipient <policy|id>`
+
+Create a TIP-1015 compound policy from three existing simple policies.
+
+Example:
+
+```text
+policy create senders whitelist
+policy create recipients whitelist
+policy create mint-recipients whitelist
+policy create-compound usdv-compound --sender senders --recipient recipients --mint-recipient mint-recipients
+```
+
+Meaning:
+
+- `sender`: who can send during transfers and transfer-from flows.
+- `recipient`: who can receive during transfers and transfer-from flows.
+- `mint-recipient`: who can receive newly minted tokens.
+
+Compound policies are immutable. To change one, edit the child policies or create a new compound policy.
+
 #### `policy allow <profile|address> [name]`
 
 Add a member to a whitelist policy.
@@ -287,6 +308,8 @@ Example:
 ```text
 policy check treasury usdv-kyc
 ```
+
+For compound policies, this prints sender, recipient, and mint-recipient authorization separately.
 
 #### `policy inspect [name]`
 

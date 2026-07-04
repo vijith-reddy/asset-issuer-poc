@@ -4,7 +4,8 @@ export type Address = `0x${string}`;
 export type PrivateKey = `0x${string}`;
 export type Hash = `0x${string}`;
 export type NetworkName = "moderato" | "local";
-export type PolicyType = "whitelist" | "blacklist";
+export type SimplePolicyType = "whitelist" | "blacklist";
+export type PolicyType = SimplePolicyType | "compound";
 export type AccountKind = "admin" | "policyAdmin" | "deployer" | "user" | "treasury" | "operator";
 export type HistoryStatus = "success" | "expected-failure";
 
@@ -56,6 +57,14 @@ export interface PolicyRecord {
   admin: string;
   network: NetworkName;
   members: Record<string, PolicyMember>;
+  compound?: {
+    senderPolicyName: string;
+    senderPolicyId: string;
+    recipientPolicyName: string;
+    recipientPolicyId: string;
+    mintRecipientPolicyName: string;
+    mintRecipientPolicyId: string;
+  };
   createdAt: string;
   txHash?: Hash;
 }
