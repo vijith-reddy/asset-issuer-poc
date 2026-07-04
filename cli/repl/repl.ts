@@ -10,7 +10,9 @@ import { handleBalanceCommand, handleSendCommand } from "../commands/payments.js
 import { handleTokenCommand } from "../commands/token.js";
 import type { ReplContext } from "./context.js";
 import { nowIso } from "../state/index.js";
+import { suggestTopLevelCommand } from "../utils/command-hints.js";
 import { formatCliError } from "../utils/errors.js";
+import { formatUnknownProfileMessage } from "../utils/profile-hints.js";
 import { REPL_HELP } from "./help.js";
 import { renderPrompt } from "./prompt.js";
 
@@ -63,7 +65,9 @@ async function handleLine(rawLine: string, context: ReplContext, output: Writabl
     return false;
   }
 
-  const [command, ...args] = line.split(/\s+/);
+  const parts = line.split(/\s+/);
+  const command = parts[0]!;
+  const args = parts.slice(1);
 
   if (command === "accounts") {
     writeAccounts(context, output);
@@ -147,6 +151,12 @@ async function handleLine(rawLine: string, context: ReplContext, output: Writabl
 
   // Unknown commands are not errors yet; future steps will route real commands here.
   output.write(`Unknown command: ${line}\n`);
+  const suggestion = suggestTopLevelCommand(command);
+
+  if (suggestion) {
+    output.write(`Did you mean: ${suggestion}\n`);
+  }
+
   output.write("Type help for available commands.\n");
   return false;
 }
@@ -155,7 +165,8 @@ function writeAccounts(context: ReplContext, output: Writable): void {
   const profiles = listAccountProfiles(context.accounts);
 
   if (profiles.length === 0) {
-    output.write("No local profiles found. Generate accounts first.\n");
+    output.write("No local profiles found.\n");
+    output.write("Create one with: make accounts-generate NAMES=\"alice\"\n");
     return;
   }
 
@@ -208,7 +219,9 @@ async function useProfile(profileName: string | undefined, context: ReplContext,
   const profile = context.accounts.accounts[normalized];
 
   if (!profile) {
-    output.write(`Unknown profile: ${profileName}\n`);
+    output.write(`${formatUnknownProfileMessage(profileName, {
+      retryCommand: `use ${normalized}`,
+    })}\n`);
     output.write("Run accounts to see available profiles.\n");
     return;
   }

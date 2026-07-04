@@ -15,6 +15,10 @@ import {
 } from "../state/index.js";
 import type { ReplContext } from "../repl/context.js";
 import { recordHistory } from "./history.js";
+import {
+  formatNoActivePolicyMessage,
+  formatUnknownPolicyMessage,
+} from "../utils/policy-hints.js";
 
 type Output = Pick<NodeJS.WritableStream, "write">;
 
@@ -91,12 +95,18 @@ function writePolicyList(context: ReplContext, output: Output): void {
 
   if (records.length === 0) {
     output.write("No local policies found.\n");
+    output.write("Create one with: policy create usdv-kyc whitelist\n");
     return;
   }
 
   for (const policy of records) {
     const activeMarker = policy.name === context.session.activePolicy ? "*" : " ";
     output.write(`${activeMarker} ${policy.name} id=${policy.id} type=${policy.type} admin=${policy.admin}`);
+    const attachedTokens = tokensAttachedToPolicy(policy, context);
+
+    if (attachedTokens.length > 0) {
+      output.write(` attachedTo=${attachedTokens.join(",")}`);
+    }
 
     if (policy.compound) {
       output.write(` sender=${policy.compound.senderPolicyName}:${policy.compound.senderPolicyId}`);
@@ -116,6 +126,9 @@ function writePolicyList(context: ReplContext, output: Output): void {
       output.write("No active policy selected for this session. Use: policy use <name>\n");
     }
   }
+
+  output.write("* = active policy for policy commands, not necessarily attached to a token\n");
+  output.write("attachedTo = local token metadata from token set-policy\n");
 }
 
 async function usePolicy(name: string | undefined, context: ReplContext, output: Output): Promise<void> {
@@ -133,6 +146,7 @@ async function createPolicy(args: string[], context: ReplContext, output: Output
 
   if (!name || !rawType) {
     output.write("Usage: policy create <name> <whitelist|blacklist> [--admin <profile|address>]\n");
+    output.write("Example: policy create usdv-kyc whitelist\n");
     return;
   }
 
@@ -199,6 +213,7 @@ async function createCompoundPolicy(args: string[], context: ReplContext, output
 
   if (!name) {
     output.write("Usage: policy create-compound <name> --sender <policy|id> --recipient <policy|id> --mint-recipient <policy|id>\n");
+    output.write("Example: policy create-compound usdv-compound --sender usdv-senders --recipient usdv-recipients --mint-recipient usdv-mint-recipients\n");
     return;
   }
 
@@ -312,6 +327,7 @@ async function checkPolicy(args: string[], context: ReplContext, output: Output)
 
   if (!targetArg) {
     output.write("Usage: policy check <profile|address> [name]\n");
+    output.write("Example: policy check alice usdv-kyc\n");
     return;
   }
 
@@ -368,11 +384,12 @@ async function modifyPolicyMember(
 
   if (!targetArg) {
     output.write(`Usage: policy ${action} <profile|address> [name]\n`);
+    output.write(`Example: policy ${action} alice usdv-kyc\n`);
     return;
   }
 
   const policy = resolvePolicy(policyName, context);
-  assertSimplePolicy(policy);
+  assertSimplePolicy(policy, action, targetArg, context);
   const target = resolveAddress(targetArg, context.accounts);
   const shouldBeIncluded = action === "allow" || action === "block";
   const walletClient = createTempoWalletClient(active, context.network);
@@ -426,12 +443,13 @@ async function setPolicyAdmin(args: string[], context: ReplContext, output: Outp
 
   if (!adminArg) {
     output.write("Usage: policy set-admin <profile|address> [name]\n");
+    output.write("Example: policy set-admin policyAdmin usdv-kyc\n");
     return;
   }
 
   const policy = resolvePolicy(policyName, context);
   if (policy.type === "compound") {
-    throw new Error("Compound policies are immutable and have no admin. Edit child policies or create a new compound policy.");
+    throw new Error(formatCompoundAdminHint(policy));
   }
 
   const admin = resolveAddress(adminArg, context.accounts);
@@ -479,7 +497,7 @@ function requirePolicyByName(name: string, context: ReplContext): PolicyRecord {
   const policy = context.policies.policies[name];
 
   if (!policy) {
-    throw new Error(name ? `Unknown policy: ${name}` : "No active policy. Use: policy use <name>");
+    throw new Error(name ? formatUnknownPolicyMessage(name, context.policies) : formatNoActivePolicyMessage(context.policies));
   }
 
   return policy;
@@ -493,9 +511,14 @@ function parsePolicyType(value: string): SimplePolicyType {
   throw new Error(`Invalid policy type "${value}". Use whitelist or blacklist.`);
 }
 
-function assertSimplePolicy(policy: PolicyRecord): asserts policy is PolicyRecord & { type: SimplePolicyType } {
+function assertSimplePolicy(
+  policy: PolicyRecord,
+  action = "allow",
+  target = "<profile|address>",
+  context?: ReplContext,
+): asserts policy is PolicyRecord & { type: SimplePolicyType } {
   if (policy.type === "compound") {
-    throw new Error("Compound policies are immutable. Edit the sender/recipient/mint-recipient child policies, or create a new compound policy.");
+    throw new Error(formatCompoundMemberHint(policy, action, target, context));
   }
 }
 
@@ -535,7 +558,12 @@ function resolvePolicyComponent(value: string, context: ReplContext): PolicyComp
   const localPolicy = context.policies.policies[normalized];
 
   if (!localPolicy) {
-    throw new Error(`Unknown policy component: ${value}. Use a local policy name, 0, 1, always-reject, or always-allow.`);
+    throw new Error([
+      `Unknown policy component: ${value}`,
+      "Use a local simple policy name, 0, 1, always-reject, or always-allow.",
+      "Run: policy list",
+      `To create one: policy create ${value} whitelist`,
+    ].join("\n"));
   }
 
   assertSimplePolicy(localPolicy);
@@ -615,10 +643,76 @@ function readCompoundPolicyId(logs: readonly Log[]): bigint {
 
 function validatePolicyAction(type: PolicyType, action: string): void {
   if (type === "whitelist" && (action === "block" || action === "unblock")) {
-    throw new Error("This is a whitelist policy. Use remove to block a member, or allow to restore them.");
+    throw new Error("This is a whitelist policy. Use remove to block a member, or allow to restore them.\nExample: policy remove alice");
   }
 
   if (type === "blacklist" && (action === "allow" || action === "remove")) {
-    throw new Error("This is a blacklist policy. Use block to add a member, or unblock to restore them.");
+    throw new Error("This is a blacklist policy. Use block to add a member, or unblock to restore them.\nExample: policy block alice");
   }
+}
+
+function tokensAttachedToPolicy(policy: PolicyRecord, context: ReplContext): string[] {
+  return Object.values(context.deployments.deployments)
+    .filter((deployment) => deployment.kind === "tip20" && deployment.metadata?.transferPolicyId === policy.id)
+    .map((deployment) => deployment.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function formatCompoundMemberHint(
+  policy: PolicyRecord,
+  action: string,
+  target: string,
+  context: ReplContext | undefined,
+): string {
+  const lines = [
+    `Compound policy "${policy.name}" is immutable.`,
+    "Edit one of its child policies instead.",
+  ];
+
+  if (policy.compound) {
+    lines.push(`Sender checks: ${formatChildPolicyMemberCommand(action, target, policy.compound.senderPolicyName, context)}`);
+    lines.push(`Recipient checks: ${formatChildPolicyMemberCommand(action, target, policy.compound.recipientPolicyName, context)}`);
+    lines.push(`Mint recipient checks: ${formatChildPolicyMemberCommand(action, target, policy.compound.mintRecipientPolicyName, context)}`);
+  }
+
+  lines.push(`Inspect the compound with: policy inspect ${policy.name}`);
+
+  return lines.join("\n");
+}
+
+function formatCompoundAdminHint(policy: PolicyRecord): string {
+  const lines = [
+    `Compound policy "${policy.name}" is immutable and has no admin.`,
+    "Change admins on the child policies or create a new compound policy.",
+  ];
+
+  if (policy.compound) {
+    lines.push(`Sender child admin: policy set-admin <profile|address> ${policy.compound.senderPolicyName}`);
+    lines.push(`Recipient child admin: policy set-admin <profile|address> ${policy.compound.recipientPolicyName}`);
+    lines.push(`Mint recipient child admin: policy set-admin <profile|address> ${policy.compound.mintRecipientPolicyName}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatChildPolicyMemberCommand(
+  action: string,
+  target: string,
+  policyName: string,
+  context: ReplContext | undefined,
+): string {
+  const child = context?.policies.policies[policyName];
+  const childAction = child?.type === "blacklist"
+    ? mapIntentToBlacklistAction(action)
+    : mapIntentToWhitelistAction(action);
+
+  return `policy ${childAction} ${target} ${policyName}`;
+}
+
+function mapIntentToWhitelistAction(action: string): string {
+  return action === "allow" || action === "unblock" ? "allow" : "remove";
+}
+
+function mapIntentToBlacklistAction(action: string): string {
+  return action === "allow" || action === "unblock" ? "unblock" : "block";
 }

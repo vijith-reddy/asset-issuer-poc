@@ -1,6 +1,7 @@
 import { getAddress, isAddress } from "viem";
 import { normalizeProfileName } from "../accounts/index.js";
 import type { AccountsState, Address } from "../state/index.js";
+import { formatUnknownProfileOrAddressMessage } from "./profile-hints.js";
 
 export interface ResolvedAddress {
   label: string;
@@ -20,7 +21,7 @@ export function resolveAddress(value: string, accounts: AccountsState): Resolved
   }
 
   if (!isAddress(value)) {
-    throw new Error(`Unknown profile or invalid address: ${value}`);
+    throw new Error(formatUnknownProfileOrAddressMessage(value));
   }
 
   return {

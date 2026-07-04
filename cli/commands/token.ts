@@ -1,4 +1,4 @@
-import { getAddress, isAddress, keccak256, parseEventLogs, toBytes, type Hash, type Log } from "viem";
+import { getAddress, isAddress, keccak256, parseEventLogs, toBytes, type Hash, type Hex, type Log } from "viem";
 import { resolveAddress } from "../utils/address-book.js";
 import {
   createTempoWalletClient,
@@ -14,8 +14,20 @@ import {
 } from "../state/index.js";
 import type { ReplContext } from "../repl/context.js";
 import { recordHistory } from "./history.js";
+import { formatUnknownPolicyMessage } from "../utils/policy-hints.js";
+import {
+  TIP20_ROLE_DEFINITIONS,
+  requireTip20RoleName,
+  type Tip20RoleDefinition,
+} from "../utils/tip20-roles.js";
 
 type Output = Pick<NodeJS.WritableStream, "write">;
+
+interface RoleTarget {
+  label: string;
+  address: Address;
+  kind: "manager" | "profile" | "address";
+}
 
 export async function handleTokenCommand(args: string[], context: ReplContext, output: Output): Promise<void> {
   const [subcommand, ...rest] = args;
@@ -26,7 +38,7 @@ export async function handleTokenCommand(args: string[], context: ReplContext, o
   }
 
   if (subcommand === "list") {
-    writeTokenList(context, output);
+    await writeTokenList(context, output);
     return;
   }
 
@@ -40,8 +52,28 @@ export async function handleTokenCommand(args: string[], context: ReplContext, o
     return;
   }
 
-  if (subcommand === "set-policy") {
+  if (subcommand === "set-policy" || subcommand === "attach-policy") {
     await setTokenPolicy(rest, context, output);
+    return;
+  }
+
+  if (subcommand === "roles") {
+    await listTokenRoles(rest, context, output);
+    return;
+  }
+
+  if (subcommand === "role-check" || subcommand === "has-role") {
+    await checkTokenRole(rest, context, output);
+    return;
+  }
+
+  if (subcommand === "grant-role") {
+    await modifyTokenRole("grant", rest, context, output);
+    return;
+  }
+
+  if (subcommand === "revoke-role") {
+    await modifyTokenRole("revoke", rest, context, output);
     return;
   }
 
@@ -55,21 +87,37 @@ function writeTokenHelp(output: Output): void {
   token list
   token inspect [symbol]
   token set-policy <symbol> <policy-name>
+  token attach-policy <symbol> <policy-name>  alias for token set-policy
+  token roles [symbol] [profile|address|manager]
+  token role-check <symbol> <profile|address|manager> <role>
+  token grant-role <symbol> <profile|address|manager> <role>
+  token revoke-role <symbol> <profile|address|manager> <role>
+
+Roles: issuer, burn-blocked, pause, unpause
+Example: token grant-role USDV manager issuer
 `);
 }
 
-function writeTokenList(context: ReplContext, output: Output): void {
+async function writeTokenList(context: ReplContext, output: Output): Promise<void> {
   const tokens = Object.values(context.deployments.deployments)
     .filter((deployment) => deployment.kind === "tip20")
     .sort((left, right) => left.name.localeCompare(right.name));
 
   if (tokens.length === 0) {
     output.write("No local TIP-20 tokens found.\n");
+    output.write("Create USDV with: token create-usdv\n");
     return;
   }
 
   for (const token of tokens) {
-    output.write(`${token.name} ${token.address} network=${token.network}\n`);
+    output.write(`${token.name} ${token.address} network=${token.network}`);
+
+    const transferPolicy = await readTransferPolicyDescription(token, context);
+    if (transferPolicy) {
+      output.write(` transferPolicy=${transferPolicy}`);
+    }
+
+    output.write("\n");
   }
 }
 
@@ -198,7 +246,7 @@ async function inspectToken(symbol: string, context: ReplContext, output: Output
   output.write(`total supply: ${totalSupply}\n`);
   output.write(`currency: ${currency}\n`);
   output.write(`quote token: ${quoteToken}\n`);
-  output.write(`transfer policy id: ${transferPolicyId}\n`);
+  output.write(`transfer policy: ${describePolicyId(transferPolicyId.toString(), context)}\n`);
 }
 
 async function setTokenPolicy(args: string[], context: ReplContext, output: Output): Promise<void> {
@@ -207,6 +255,7 @@ async function setTokenPolicy(args: string[], context: ReplContext, output: Outp
 
   if (!symbol || !policyName) {
     output.write("Usage: token set-policy <symbol> <policy-name>\n");
+    output.write("Example: token set-policy USDV usdv-kyc\n");
     return;
   }
 
@@ -214,7 +263,7 @@ async function setTokenPolicy(args: string[], context: ReplContext, output: Outp
   const policy = context.policies.policies[policyName];
 
   if (!policy) {
-    throw new Error(`Unknown policy: ${policyName}`);
+    throw new Error(formatUnknownPolicyMessage(policyName, context.policies));
   }
 
   const walletClient = createTempoWalletClient(active, context.network);
@@ -249,6 +298,136 @@ async function setTokenPolicy(args: string[], context: ReplContext, output: Outp
   output.write(`tx: ${hash}\n`);
 }
 
+async function listTokenRoles(args: string[], context: ReplContext, output: Output): Promise<void> {
+  const [symbolArg, targetArg] = args;
+  const token = requireToken(symbolArg ?? "USDV", context);
+  const target = targetArg
+    ? resolveRoleTarget(targetArg, context)
+    : maybeResolveManagerTarget(context);
+
+  output.write(`TIP-20 roles for ${token.name} ${token.address}\n`);
+
+  if (target) {
+    output.write(`target: ${target.label} ${target.address}\n`);
+  } else {
+    output.write("target: none; deploy manager or pass a profile/address to check membership\n");
+  }
+
+  for (const role of TIP20_ROLE_DEFINITIONS) {
+    const roleId = await readRoleId(token, role, context);
+    const adminRole = await context.publicClient.readContract({
+      address: token.address,
+      abi: tip20Abi,
+      functionName: "getRoleAdmin",
+      args: [roleId],
+    });
+    const status = target
+      ? await context.publicClient.readContract({
+        address: token.address,
+        abi: tip20Abi,
+        functionName: "hasRole",
+        args: [target.address, roleId],
+      })
+      : undefined;
+
+    output.write(`${role.name} ${role.displayName}\n`);
+    output.write(`  id: ${roleId}\n`);
+    output.write(`  admin role: ${describeRoleId(adminRole, roleId)}\n`);
+
+    if (target) {
+      output.write(`  ${target.label}: ${status ? "granted" : "not granted"}\n`);
+    }
+
+    output.write(`  ${role.description}\n`);
+  }
+
+  output.write("Use: token grant-role USDV manager issuer\n");
+  output.write("Use: token revoke-role USDV <profile|address|manager> <role>\n");
+}
+
+async function checkTokenRole(args: string[], context: ReplContext, output: Output): Promise<void> {
+  const [symbol, targetArg, roleArg] = args;
+
+  if (!symbol || !targetArg || !roleArg) {
+    output.write("Usage: token role-check <symbol> <profile|address|manager> <role>\n");
+    output.write("Example: token role-check USDV manager issuer\n");
+    return;
+  }
+
+  const token = requireToken(symbol, context);
+  const target = resolveRoleTarget(targetArg, context);
+  const role = requireTip20RoleName(roleArg);
+  const roleId = await readRoleId(token, role, context);
+  const hasRole = await context.publicClient.readContract({
+    address: token.address,
+    abi: tip20Abi,
+    functionName: "hasRole",
+    args: [target.address, roleId],
+  });
+
+  output.write(`${target.label} ${hasRole ? "has" : "does not have"} ${role.displayName} on ${token.name}\n`);
+  output.write(`target: ${target.address}\n`);
+  output.write(`role id: ${roleId}\n`);
+}
+
+async function modifyTokenRole(
+  action: "grant" | "revoke",
+  args: string[],
+  context: ReplContext,
+  output: Output,
+): Promise<void> {
+  const active = requireActiveProfile(context);
+  const [symbol, targetArg, roleArg] = args;
+
+  if (!symbol || !targetArg || !roleArg) {
+    output.write(`Usage: token ${action}-role <symbol> <profile|address|manager> <role>\n`);
+    output.write(`Example: token ${action}-role USDV manager issuer\n`);
+    return;
+  }
+
+  const token = requireToken(symbol, context);
+  const target = resolveRoleTarget(targetArg, context);
+  const role = requireTip20RoleName(roleArg);
+  const roleId = await readRoleId(token, role, context);
+  const walletClient = createTempoWalletClient(active, context.network);
+  const hash = await walletClient.writeContract({
+    address: token.address,
+    abi: tip20Abi,
+    functionName: action === "grant" ? "grantRole" : "revokeRole",
+    args: [roleId, target.address],
+  });
+
+  await context.publicClient.waitForTransactionReceipt({ hash });
+  updateLocalRoleMetadata(token, action, target, role, hash);
+  context.deployments.updatedAt = nowIso();
+  await context.saveDeployments(context.deployments);
+  await recordHistory(context, {
+    action: `token ${action}-role`,
+    summary: `${action === "grant" ? "granted" : "revoked"} ${role.name} for ${target.label}`,
+    txs: [{ label: action === "grant" ? "grantRole" : "revokeRole", hash }],
+    metadata: {
+      token: token.address,
+      target: target.address,
+      role: role.name,
+      roleId,
+    },
+  });
+
+  output.write(`${action === "grant" ? "granted" : "revoked"} ${role.displayName} on ${token.name} for ${target.label}\n`);
+  output.write(`target: ${target.address}\n`);
+  output.write(`role id: ${roleId}\n`);
+
+  if (action === "grant" && role.name === "issuer" && target.kind !== "manager") {
+    output.write("warning: issuer allows mint/burn outside the manager flow; for this POC prefer manager as the issuer holder.\n");
+  }
+
+  if (action === "revoke" && target.kind === "manager" && role.name === "issuer") {
+    output.write("warning: revoking issuer from manager will break subscribe/admin-subscribe minting.\n");
+  }
+
+  output.write(`tx: ${hash}\n`);
+}
+
 function requireActiveProfile(context: ReplContext) {
   if (!context.activeProfile) {
     throw new Error("No active profile. Use: use admin");
@@ -261,7 +440,11 @@ function requireToken(symbol: string, context: ReplContext): DeploymentRecord {
   const token = context.deployments.deployments[tokenStateKey(symbol)];
 
   if (!token || token.kind !== "tip20") {
-    throw new Error(`Unknown TIP-20 token: ${symbol}`);
+    throw new Error([
+      `Unknown TIP-20 token: ${symbol}`,
+      "Run: token list",
+      "If USDV is missing, create it with: token create-usdv",
+    ].join("\n"));
   }
 
   return token;
@@ -292,7 +475,7 @@ function resolveQuoteToken(value: string): Address {
   }
 
   if (!isAddress(value)) {
-    throw new Error(`Unknown quote token: ${value}`);
+    throw new Error(`Unknown quote token: ${value}. Use pathUSD or a valid 0x token address.`);
   }
 
   return getAddress(value);
@@ -316,4 +499,126 @@ function readCreatedTokenAddress(logs: readonly Log[]): Address | undefined {
   });
 
   return events[0]?.args.token;
+}
+
+async function readRoleId(
+  token: DeploymentRecord,
+  role: Tip20RoleDefinition,
+  context: ReplContext,
+): Promise<Hex> {
+  return context.publicClient.readContract({
+    address: token.address,
+    abi: tip20Abi,
+    functionName: role.functionName,
+  });
+}
+
+function resolveRoleTarget(value: string, context: ReplContext): RoleTarget {
+  if (value.trim().toLowerCase() === "manager") {
+    const manager = context.deployments.deployments.manager;
+
+    if (!manager || manager.kind !== "manager") {
+      throw new Error([
+        "Missing deployment: manager",
+        "Run: manager deploy",
+        "Then grant roles with: manager grant-operational-roles",
+      ].join("\n"));
+    }
+
+    return {
+      label: "manager",
+      address: manager.address,
+      kind: "manager",
+    };
+  }
+
+  const resolved = resolveAddress(value, context.accounts);
+
+  return {
+    label: resolved.label,
+    address: resolved.address,
+    kind: resolved.isKnownProfile ? "profile" : "address",
+  };
+}
+
+function maybeResolveManagerTarget(context: ReplContext): RoleTarget | undefined {
+  const manager = context.deployments.deployments.manager;
+
+  if (!manager || manager.kind !== "manager") {
+    return undefined;
+  }
+
+  return {
+    label: "manager",
+    address: manager.address,
+    kind: "manager",
+  };
+}
+
+function updateLocalRoleMetadata(
+  token: DeploymentRecord,
+  action: "grant" | "revoke",
+  target: RoleTarget,
+  role: Tip20RoleDefinition,
+  hash: Hash,
+): void {
+  const prefix = `role.${role.name}.${target.label}`;
+
+  token.metadata = {
+    ...(token.metadata ?? {}),
+    [`${prefix}.address`]: target.address,
+    [`${prefix}.status`]: action === "grant" ? "granted" : "revoked",
+    [`${prefix}.tx`]: hash,
+  };
+}
+
+function describeRoleId(adminRole: Hex, ownRole: Hex): string {
+  if (adminRole === ownRole) {
+    return `${adminRole} self-admin`;
+  }
+
+  return adminRole;
+}
+
+async function readTransferPolicyDescription(token: DeploymentRecord, context: ReplContext): Promise<string | undefined> {
+  try {
+    const policyId = await context.publicClient.readContract({
+      address: token.address,
+      abi: tip20Abi,
+      functionName: "transferPolicyId",
+    });
+
+    return describePolicyId(policyId.toString(), context);
+  } catch {
+    const policyName = token.metadata?.transferPolicy;
+    const policyId = token.metadata?.transferPolicyId;
+
+    if (policyName && policyId) {
+      return `${policyName}:${policyId} local`;
+    }
+
+    if (policyId) {
+      return `id:${policyId} local`;
+    }
+
+    return undefined;
+  }
+}
+
+function describePolicyId(policyId: string, context: ReplContext): string {
+  if (policyId === "0") {
+    return "always-reject:0";
+  }
+
+  if (policyId === "1") {
+    return "always-allow:1";
+  }
+
+  const policy = Object.values(context.policies.policies).find((record) => record.id === policyId);
+
+  if (policy) {
+    return `${policy.name}:${policy.id}`;
+  }
+
+  return `id:${policyId}`;
 }

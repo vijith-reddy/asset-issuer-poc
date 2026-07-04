@@ -13,6 +13,15 @@ import {
 import { nowIso, type AccountProfile, type DeploymentRecord, type Hash } from "../state/index.js";
 import type { ReplContext } from "../repl/context.js";
 import { recordHistory } from "./history.js";
+import {
+  formatNoActivePolicyMessage,
+  formatUnknownPolicyMessage,
+} from "../utils/policy-hints.js";
+import {
+  TIP20_MANAGER_OPERATIONAL_ROLE_NAMES,
+  getTip20RoleDefinition,
+  type Tip20RoleDefinition,
+} from "../utils/tip20-roles.js";
 
 type Output = Pick<NodeJS.WritableStream, "write">;
 
@@ -40,6 +49,11 @@ export async function handleManagerCommand(args: string[], context: ReplContext,
 
   if (subcommand === "grant-issuer") {
     await grantIssuer(context, output);
+    return;
+  }
+
+  if (subcommand === "grant-operational-roles") {
+    await grantOperationalRoles(context, output);
     return;
   }
 
@@ -77,6 +91,7 @@ function writeManagerHelp(output: Output): void {
   manager deploy [--admin <profile|address>]
   manager inspect
   manager grant-issuer
+  manager grant-operational-roles
   manager allow-policy [policy-name]
   manager faucet
   manager subscribe <amount> [--min <amount>] [--trace|--no-trace]
@@ -215,6 +230,71 @@ async function grantIssuer(context: ReplContext, output: Output): Promise<void> 
 
   output.write(`granted ISSUER_ROLE on USDV to manager ${manager.address}\n`);
   output.write(`tx: ${hash}\n`);
+}
+
+async function grantOperationalRoles(context: ReplContext, output: Output): Promise<void> {
+  const active = requireActiveProfile(context);
+  const manager = requireDeployment("manager", context);
+  const usdv = requireDeployment("usdv", context);
+  const walletClient = createTempoWalletClient(active, context.network);
+  const txs: { label: string; hash: Hash }[] = [];
+
+  for (const roleName of TIP20_MANAGER_OPERATIONAL_ROLE_NAMES) {
+    const role = getTip20RoleDefinition(roleName);
+    const roleId = await readRoleId(usdv, role, context);
+    const alreadyGranted = await context.publicClient.readContract({
+      address: usdv.address,
+      abi: tip20Abi,
+      functionName: "hasRole",
+      args: [manager.address, roleId],
+    });
+
+    if (alreadyGranted) {
+      output.write(`manager already has ${role.displayName}\n`);
+      continue;
+    }
+
+    const hash = await walletClient.writeContract({
+      address: usdv.address,
+      abi: tip20Abi,
+      functionName: "grantRole",
+      args: [roleId, manager.address],
+    });
+    await context.publicClient.waitForTransactionReceipt({ hash });
+
+    txs.push({ label: `grant ${role.displayName}`, hash });
+    output.write(`granted ${role.displayName} to manager\n`);
+  }
+
+  usdv.metadata = {
+    ...(usdv.metadata ?? {}),
+    managerOperationalRoles: TIP20_MANAGER_OPERATIONAL_ROLE_NAMES.join(","),
+    managerOperationalRolesGrantedTo: manager.address,
+    managerOperationalRolesUpdatedAt: nowIso(),
+  };
+  manager.metadata = {
+    ...(manager.metadata ?? {}),
+    operationalRolesGrantedOn: usdv.address,
+    operationalRoles: TIP20_MANAGER_OPERATIONAL_ROLE_NAMES.join(","),
+  };
+  context.deployments.updatedAt = nowIso();
+  await context.saveDeployments(context.deployments);
+
+  if (txs.length > 0) {
+    await recordHistory(context, {
+      action: "manager grant-operational-roles",
+      summary: `granted ${txs.length} operational role(s) to manager`,
+      txs,
+      metadata: {
+        usdv: usdv.address,
+        manager: manager.address,
+        roles: TIP20_MANAGER_OPERATIONAL_ROLE_NAMES.join(","),
+      },
+    });
+  }
+
+  output.write(`manager operational roles ready on USDV ${usdv.address}\n`);
+  output.write(`manager: ${manager.address}\n`);
 }
 
 async function allowManagerInPolicy(policyName: string | undefined, context: ReplContext, output: Output): Promise<void> {
@@ -735,6 +815,10 @@ function writeAdminSubscribeTrace(
 }
 
 function describeIssuerRole(manager: DeploymentRecord, usdv: DeploymentRecord): string {
+  if (manager.metadata?.operationalRolesGrantedOn?.toLowerCase() === usdv.address.toLowerCase()) {
+    return `manager has operational TIP-20 roles (${manager.metadata.operationalRoles})`;
+  }
+
   if (manager.metadata?.issuerRoleTx && manager.metadata.issuerRoleGrantedOn?.toLowerCase() === usdv.address.toLowerCase()) {
     return `manager has USDV ISSUER_ROLE (grant tx ${manager.metadata.issuerRoleTx})`;
   }
@@ -754,7 +838,7 @@ function requireDeployment(name: "usdv" | "manager", context: ReplContext): Depl
   const deployment = context.deployments.deployments[name];
 
   if (!deployment) {
-    throw new Error(`Missing deployment: ${name}`);
+    throw new Error(formatMissingDeploymentMessage(name));
   }
 
   return deployment;
@@ -762,13 +846,13 @@ function requireDeployment(name: "usdv" | "manager", context: ReplContext): Depl
 
 function requirePolicy(name: string | undefined, context: ReplContext) {
   if (!name) {
-    throw new Error("No policy selected. Use policy use <name> or pass a policy name.");
+    throw new Error(formatNoActivePolicyMessage(context.policies));
   }
 
   const policy = context.policies.policies[name];
 
   if (!policy) {
-    throw new Error(`Unknown policy: ${name}`);
+    throw new Error(formatUnknownPolicyMessage(name, context.policies));
   }
 
   return policy;
@@ -790,4 +874,35 @@ function readOption(args: string[], option: string): string | undefined {
   }
 
   return args[index + 1];
+}
+
+function formatMissingDeploymentMessage(name: "usdv" | "manager"): string {
+  if (name === "usdv") {
+    return [
+      "Missing deployment: USDV",
+      "Run: token create-usdv",
+      "Then attach a policy with: token set-policy USDV <policy-name>",
+    ].join("\n");
+  }
+
+  return [
+    "Missing deployment: manager",
+    "Run the manager bootstrap sequence:",
+    "manager deploy",
+    "manager grant-operational-roles",
+    "manager allow-policy <policy-name>",
+    "manager faucet",
+  ].join("\n");
+}
+
+async function readRoleId(
+  usdv: DeploymentRecord,
+  role: Tip20RoleDefinition,
+  context: ReplContext,
+): Promise<Hex> {
+  return context.publicClient.readContract({
+    address: usdv.address,
+    abi: tip20Abi,
+    functionName: role.functionName,
+  });
 }

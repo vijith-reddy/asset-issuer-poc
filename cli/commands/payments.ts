@@ -164,7 +164,10 @@ function parseSendArgs(args: string[]): { amount: string; symbol: string; recipi
   const recipient = args[toIndex + 1];
 
   if (!args[0] || !args[1] || toIndex !== 2 || !recipient) {
-    throw new Error("Usage: send <amount> <USDV|pathUSD> to <profile|address> [--memo <text>]");
+    throw new Error([
+      "Usage: send <amount> <USDV|pathUSD> to <profile|address> [--memo <text>]",
+      "Example: send 3 USDV to bob --memo invoice-001",
+    ].join("\n"));
   }
 
   const parsed: { amount: string; symbol: string; recipient: string; memo?: string } = {
@@ -235,7 +238,11 @@ function requireTokenDeployment(symbol: "USDV", context: ReplContext): Deploymen
   const token = context.deployments.deployments[symbol.toLowerCase()];
 
   if (!token || token.kind !== "tip20") {
-    throw new Error(`Missing ${symbol} deployment. Run token create-usdv first.`);
+    throw new Error([
+      `Missing ${symbol} deployment.`,
+      "Run: token create-usdv",
+      "Then attach a policy with: token set-policy USDV <policy-name>",
+    ].join("\n"));
   }
 
   return token;

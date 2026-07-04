@@ -101,7 +101,7 @@ token create-usdv
 token set-policy USDV usdv-kyc
 
 manager deploy
-manager grant-issuer
+manager grant-operational-roles
 manager allow-policy usdv-kyc
 manager faucet
 ```
@@ -112,7 +112,7 @@ At this point:
 - USDV uses the `usdv-kyc` TIP-403 whitelist.
 - Alice and Bob are allowed.
 - Treasury is not allowed.
-- The lifecycle manager can mint and burn USDV.
+- The lifecycle manager has the TIP-20 operational roles used by this POC.
 - The manager has pathUSD reserves for redemption tests.
 
 ## Play With The CLI
@@ -385,13 +385,72 @@ Example:
 token set-policy USDV usdv-kyc
 ```
 
+Alias:
+
+```text
+token attach-policy USDV usdv-kyc
+```
+
 #### `token inspect [symbol]`
 
 Read token metadata from chain.
 
 #### `token list`
 
-List locally known TIP-20 deployments.
+List locally known TIP-20 deployments and the token transfer policy.
+
+#### `token roles [symbol] [profile|address|manager]`
+
+List supported TIP-20 roles and optionally check whether a profile, raw address, or the manager contract has each role.
+
+Supported role names:
+
+```text
+issuer
+burn-blocked
+pause
+unpause
+```
+
+Examples:
+
+```text
+token roles USDV
+token roles USDV manager
+token roles USDV alice
+```
+
+TIP-20 roles are membership based. More than one account can hold the same role, but this POC expects the manager contract to hold operational roles.
+
+#### `token role-check <symbol> <profile|address|manager> <role>`
+
+Check one role assignment.
+
+Example:
+
+```text
+token role-check USDV manager issuer
+```
+
+#### `token grant-role <symbol> <profile|address|manager> <role>`
+
+Grant a TIP-20 role. This should normally be run from the token admin profile.
+
+Example:
+
+```text
+token grant-role USDV manager issuer
+```
+
+#### `token revoke-role <symbol> <profile|address|manager> <role>`
+
+Revoke a TIP-20 role. Revoking `issuer` from `manager` breaks the subscribe and admin-subscribe mint path.
+
+Example:
+
+```text
+token revoke-role USDV alice issuer
+```
 
 ### Manager API
 
@@ -410,6 +469,19 @@ Constructor inputs:
 #### `manager grant-issuer`
 
 Grant USDV `ISSUER_ROLE` to the manager.
+
+#### `manager grant-operational-roles`
+
+Grant the manager contract the full TIP-20 role bundle this POC uses:
+
+```text
+issuer
+burn-blocked
+pause
+unpause
+```
+
+This is the preferred bootstrap command for the POC because the manager contract should stay the operational holder of mint/burn lifecycle authority.
 
 #### `manager allow-policy [policy-name]`
 
@@ -431,7 +503,7 @@ Flow:
 2. Call manager `subscribe`.
 3. Manager pulls pathUSD.
 4. Manager calls USDV `mintWithMemo`.
-5. Mint succeeds because the manager has USDV `ISSUER_ROLE`.
+5. Mint succeeds because the manager has the required TIP-20 issuer role.
 
 Alias:
 
@@ -450,7 +522,7 @@ Flow:
 3. Manager pulls USDV.
 4. Manager calls USDV `burnWithMemo`.
 5. Manager returns pathUSD.
-6. Burn succeeds because the manager has USDV `ISSUER_ROLE`.
+6. Burn succeeds because the manager is the operational lifecycle contract.
 
 Alias:
 

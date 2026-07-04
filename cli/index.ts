@@ -1,3 +1,4 @@
+import { stderr } from "node:process";
 import { Command } from "commander";
 import { normalizeProfileName } from "./accounts/index.js";
 import { getTempoNetworkConfig, loadPocEnv } from "./config/index.js";
@@ -19,6 +20,8 @@ import {
   type AccountProfile,
   type NetworkName,
 } from "./state/index.js";
+import { formatCliError } from "./utils/errors.js";
+import { formatUnknownProfileMessage } from "./utils/profile-hints.js";
 
 interface CliOptions {
   as?: string;
@@ -35,7 +38,12 @@ const program = new Command()
 
 program.parse();
 
-await main(program.opts<CliOptions>());
+try {
+  await main(program.opts<CliOptions>());
+} catch (error) {
+  stderr.write(`Error: ${formatCliError(error)}\n`);
+  process.exitCode = 1;
+}
 
 async function main(options: CliOptions): Promise<void> {
   await ensureLocalStateLayout();
@@ -57,7 +65,9 @@ async function main(options: CliOptions): Promise<void> {
     const profile = accounts.accounts[profileName];
 
     if (!profile) {
-      throw new Error(`Unknown profile "${options.as}". Generate it first or choose an existing profile.`);
+      throw new Error(formatUnknownProfileMessage(options.as, {
+        retryCommand: `make poc-as PROFILE=${profileName}`,
+      }));
     }
 
     // Keep the private key in memory only. The prompt shows the name, never the secret.
