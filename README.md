@@ -12,6 +12,46 @@ It uses:
 
 The UX is intentionally terminal-first. You open a shell as an entity, like Alice or Admin, and then issue commands from that identity.
 
+## Authority Model
+
+The POC separates token configuration, policy administration, and lifecycle execution.
+
+```text
+admin
+  TIP-20 token admin / governance profile.
+  Creates USDV, attaches a TIP-403 policy id to USDV, and grants/revokes TIP-20 roles.
+
+policyAdmin
+  TIP-403 policy owner/operator profile when assigned as policy admin.
+  Edits whitelist/blacklist membership for a policy id.
+
+manager
+  Smart contract that receives operational TIP-20 roles.
+  Executes subscribe, redeem, and admin-subscribe flows.
+
+alice/bob
+  End-user profiles.
+```
+
+Attaching a policy to USDV is a token admin action:
+
+```text
+admin> token set-policy USDV usdv-kyc
+```
+
+Editing a policy is a policy admin action:
+
+```text
+policyadmin> policy allow alice usdv-kyc
+policyadmin> policy remove bob usdv-kyc
+```
+
+If a policy was originally created with `admin` as its admin, `policyAdmin` cannot edit it until the policy admin is changed:
+
+```text
+admin> policy set-admin policyAdmin usdv-kyc
+```
+
 ## Start Here
 
 ### Prerequisites
