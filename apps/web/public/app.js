@@ -752,7 +752,9 @@ function switchView(view) {
 }
 
 function bind(action, handler) {
-  document.querySelector(`[data-action="${action}"]`)?.addEventListener("click", handler);
+  document.querySelectorAll(`[data-action="${action}"]`).forEach((button) => {
+    button.addEventListener("click", handler);
+  });
 }
 
 function input(id, label, defaultValue) {
@@ -1019,7 +1021,7 @@ function parseReceipt(text) {
   const raw = text.trim();
   const [heading = "Action", ...rest] = raw.split("\n");
   const lines = rest.map((line) => line.trimEnd()).filter(Boolean);
-  const hasError = /^Error:/m.test(raw) || /reverted|not authorized|blocked|failed/i.test(raw);
+  const hasError = [heading, ...lines].some((line) => isErrorLine(line.trim()));
   const txs = [];
   const balances = [];
   const flow = [];
@@ -1032,15 +1034,15 @@ function parseReceipt(text) {
       continue;
     }
 
-    const tx = line.match(/^\s*([^:]+):\s*(0x[a-fA-F0-9]{64})$/);
-
-    if (tx) {
-      txs.push({ label: tx[1].trim(), hash: tx[2] });
+    if (isTraceLine(line, inTrace)) {
+      flow.push(line.trim());
       continue;
     }
 
-    if (inTrace || /^\s*(\d+\.|-)\s+/.test(line)) {
-      flow.push(line.trim());
+    const tx = parseTransactionLine(line);
+
+    if (tx) {
+      txs.push(tx);
       continue;
     }
 
@@ -1063,6 +1065,41 @@ function parseReceipt(text) {
     txs,
     raw,
   };
+}
+
+function isErrorLine(line) {
+  return /^Error\b:?/i.test(line)
+    || /^execution reverted\b/i.test(line)
+    || /^Details:\s*execution reverted\b/i.test(line)
+    || /^failed\b/i.test(line)
+    || /not authorized/i.test(line);
+}
+
+function isTraceLine(line, inTrace) {
+  const trimmed = line.trim();
+
+  return /^\s*(\d+\.|-)\s+/.test(line)
+    || (inTrace && /^\s+/.test(line) && trimmed !== "");
+}
+
+function parseTransactionLine(line) {
+  const tx = line.match(/^\s*([^:]+):\s*(0x[a-fA-F0-9]{64})$/);
+
+  if (!tx) return undefined;
+
+  const label = tx[1].trim();
+
+  if (!isTransactionLabel(label)) return undefined;
+
+  return { label, hash: tx[2] };
+}
+
+function isTransactionLabel(label) {
+  const normalized = label.toLowerCase();
+
+  if (normalized === "tx" || normalized.endsWith(" tx")) return true;
+
+  return /transaction|transfer|approve|subscribe|redeem|grant|create|modify|change|mint|burn/.test(normalized);
 }
 
 function receiptCard(receipt) {
