@@ -319,13 +319,29 @@ function renderCompliance() {
             <h2>Policy decision preview</h2>
           </div>
         </div>
-        <div class="form-grid four">
-          ${select("simPolicy", "Policy", policyOptions())}
-          ${select("simAction", "Action", [["transfer", "Transfer"], ["mint", "Mint"], ["redeem", "Redeem"]])}
-          ${select("simSender", "Sender", profileOptions("alice"))}
-          ${select("simRecipient", "Recipient", profileOptions("bob"))}
-          <button class="primary" data-action="simulate-policy">Run Policy Check</button>
-          <button data-action="attach-policy-from-compliance">Attach Selected Policy</button>
+        <div class="simulator-grid">
+          <div class="preview-card">
+            <span class="label">Simple Policy</span>
+            <h3>Address eligibility</h3>
+            <div class="form-grid">
+              ${select("simSimplePolicy", "Allow/Block Policy", simplePolicyOptions())}
+              ${select("simSimpleTarget", "Address", profileOptions("alice"))}
+              <button class="primary" data-action="simulate-simple-policy">Check Address</button>
+              <button data-action="attach-simple-policy">Attach Simple Policy</button>
+            </div>
+          </div>
+          <div class="preview-card">
+            <span class="label">Compound Policy</span>
+            <h3>Transfer / mint decision</h3>
+            <div class="form-grid">
+              ${select("simCompoundPolicy", "Compound Policy", compoundPolicyOptions())}
+              ${select("simCompoundAction", "Action", [["transfer", "Transfer"], ["mint", "Mint"], ["redeem", "Redeem"]])}
+              ${select("simCompoundSender", "Sender", profileOptions("alice"))}
+              ${select("simCompoundRecipient", "Recipient", profileOptions("bob"))}
+              <button class="primary" data-action="simulate-compound-policy">Preview Decision</button>
+              <button data-action="attach-compound-policy">Attach Compound Policy</button>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -635,12 +651,19 @@ function wireComplianceActions() {
   bind("policy-block", () => run("admin", "policy", ["block", value("policyTarget"), value("policyEditName")]));
   bind("policy-unblock", () => run("admin", "policy", ["unblock", value("policyTarget"), value("policyEditName")]));
   bind("policy-check", () => run("admin", "policy", ["check", value("policyTarget"), value("policyEditName")]));
-  bind("attach-policy-from-compliance", () => run("admin", "token", ["set-policy", selectedTokenName(), value("simPolicy")]));
-  bind("simulate-policy", async () => {
-    const policy = value("simPolicy");
-    const action = value("simAction");
-    const sender = value("simSender");
-    const recipient = value("simRecipient");
+  bind("attach-simple-policy", () => run("admin", "token", ["set-policy", selectedTokenName(), value("simSimplePolicy")]));
+  bind("attach-compound-policy", () => run("admin", "token", ["set-policy", selectedTokenName(), value("simCompoundPolicy")]));
+  bind("simulate-simple-policy", () => run(
+    "admin",
+    "policy",
+    ["check", value("simSimpleTarget"), value("simSimplePolicy")],
+    `simulator> simple policy ${value("simSimplePolicy")} checks ${value("simSimpleTarget")}`,
+  ));
+  bind("simulate-compound-policy", async () => {
+    const policy = value("simCompoundPolicy");
+    const action = value("simCompoundAction");
+    const sender = value("simCompoundSender");
+    const recipient = value("simCompoundRecipient");
 
     if (action === "mint") {
       await run("admin", "policy", ["check", recipient, policy], `simulator> mint recipient ${recipient} under ${policy}`);
@@ -964,6 +987,12 @@ function policyOptions() {
 function simplePolicyOptions() {
   return state.policies
     .filter((policy) => policy.type !== "compound")
+    .map((policy) => [policy.name, `${policy.name} #${policy.id}`]);
+}
+
+function compoundPolicyOptions() {
+  return state.policies
+    .filter((policy) => policy.type === "compound")
     .map((policy) => [policy.name, `${policy.name} #${policy.id}`]);
 }
 
