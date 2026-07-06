@@ -1,6 +1,8 @@
-const views = ["overview", "admin", "compliance", "operator", "investors", "simulation", "activity"];
-let activeView = "overview";
-let simulationActor = "alice";
+const views = ["admin", "operator", "users", "activity"];
+let activeView = "admin";
+let adminTab = "policies";
+let operatorTab = "supply";
+let userActor = "alice";
 let state = null;
 let receiptCount = 0;
 
@@ -11,11 +13,7 @@ const clearOutputButton = document.querySelector("#clearOutputButton");
 
 document.querySelectorAll(".nav-button").forEach((button) => {
   button.addEventListener("click", () => {
-    activeView = button.dataset.view;
-    document.querySelectorAll(".nav-button").forEach((tab) => {
-      tab.classList.toggle("is-active", tab === button);
-    });
-    render();
+    switchView(button.dataset.view);
   });
 });
 
@@ -55,12 +53,9 @@ async function refreshState() {
 function render() {
   renderStatus();
 
-  if (activeView === "overview") renderOverview();
   if (activeView === "admin") renderAdmin();
-  if (activeView === "compliance") renderCompliance();
   if (activeView === "operator") renderOperator();
-  if (activeView === "investors") renderInvestors();
-  if (activeView === "simulation") renderSimulation();
+  if (activeView === "users") renderUsers();
   if (activeView === "activity") renderActivity();
 }
 
@@ -76,94 +71,6 @@ function renderStatus() {
   document.querySelector("#investorStatus").textContent = `${eligible.length} eligible`;
 }
 
-function renderOverview() {
-  const token = selectedToken();
-  const policy = attachedPolicy(token);
-  const checks = readinessChecks();
-  const complete = checks.filter((check) => check.ok).length;
-
-  workspacePanel.innerHTML = `
-    <section class="hero-panel">
-      <div>
-        <span class="eyebrow">Issuer workspace</span>
-        <h2>${escapeHtml(token?.name ?? "New Asset")}</h2>
-        <p class="hero-line">${complete} of ${checks.length} operational checks complete</p>
-      </div>
-      <div class="hero-actions">
-        <button class="primary" data-action="go-issue">Issue Asset</button>
-        <button data-action="go-policy">Edit Compliance</button>
-        <button data-action="go-sim">Run Simulation</button>
-      </div>
-    </section>
-
-    <div class="section-grid">
-      <section class="tool-section wide">
-        <div class="section-heading">
-          <div>
-            <span class="label">Readiness</span>
-            <h2>Operational setup</h2>
-          </div>
-          <span class="score-badge">${complete}/${checks.length}</span>
-        </div>
-        <div class="check-grid">
-          ${checks.map((check) => readinessItem(check)).join("")}
-        </div>
-      </section>
-
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Asset</span>
-            <h2>Configuration</h2>
-          </div>
-        </div>
-        ${keyValueList([
-          ["Token", token ? `${token.name} ${shortAddress(token.address)}` : "Not created"],
-          ["Settlement", token?.metadata?.quoteToken ? shortAddress(token.metadata.quoteToken) : "pathUSD"],
-          ["Policy", policy ? `${policy.name} #${policy.id}` : "Not attached"],
-          ["Operator", state.manager ? shortAddress(state.manager.address) : "Not deployed"],
-        ])}
-      </section>
-
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Next Actions</span>
-            <h2>Setup queue</h2>
-          </div>
-        </div>
-        <div class="button-stack">
-          ${!token ? `<button class="primary" data-action="go-admin">Create Asset Token</button>` : ""}
-          ${!selectedPolicy() ? `<button class="primary" data-action="go-policy">Create Compliance Policy</button>` : ""}
-          ${token && selectedPolicy() && !policy ? `<button class="primary" data-action="attach-default-policy">Attach Compliance Policy</button>` : ""}
-          ${!state.manager ? `<button class="primary" data-action="manager-deploy">Deploy Operator</button>` : ""}
-          ${state.manager ? `<button data-action="manager-roles">Check Operator Roles</button>` : ""}
-          <button data-action="show-activity">Review Activity</button>
-        </div>
-      </section>
-
-      <section class="tool-section wide">
-        <div class="section-heading">
-          <div>
-            <span class="label">Recent Activity</span>
-            <h2>Issuer receipts</h2>
-          </div>
-        </div>
-        ${activityList(5)}
-      </section>
-    </div>
-  `;
-
-  bind("go-issue", () => switchView("operator"));
-  bind("go-policy", () => switchView("compliance"));
-  bind("go-sim", () => switchView("simulation"));
-  bind("go-admin", () => switchView("admin"));
-  bind("show-activity", () => switchView("activity"));
-  bind("attach-default-policy", () => run("admin", "token", ["set-policy", selectedTokenName(), selectedPolicyName()]));
-  bind("manager-deploy", () => run("admin", "manager", ["deploy"]));
-  bind("manager-roles", () => run("admin", "token", ["roles", selectedTokenName(), "manager"]));
-}
-
 function renderAdmin() {
   const token = selectedToken();
   const policy = attachedPolicy(token);
@@ -171,21 +78,60 @@ function renderAdmin() {
   workspacePanel.innerHTML = `
     <div class="page-heading">
       <div>
-        <span class="eyebrow">Asset administrator</span>
-        <h2>Asset configuration</h2>
+        <span class="eyebrow">Issuer admin</span>
+        <h2>Configure asset, policy, and roles</h2>
       </div>
       <div class="button-row">
-        <button data-action="token-list">List Assets</button>
         <button data-action="token-inspect">Inspect Asset</button>
+        <button data-action="policy-inspect">Inspect Policy</button>
       </div>
     </div>
 
+    ${subnav("admin", [
+      ["asset", "Asset"],
+      ["policies", "Attach Policy"],
+      ["roles", "TIP-20 Roles"],
+    ], adminTab)}
+
+    ${adminTab === "asset" ? renderAdminAssetTab(token, policy) : ""}
+    ${adminTab === "policies" ? renderAdminPoliciesTab(token, policy) : ""}
+    ${adminTab === "roles" ? renderAdminRolesTab(token) : ""}
+  `;
+
+  wireAdminActions();
+  wireComplianceActions();
+  wireAdminTabs();
+}
+
+function renderAdminAssetTab(token, policy) {
+  return `
     <div class="section-grid">
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Asset In Use</span>
+            <h2>${escapeHtml(token?.name ?? "No token")}</h2>
+          </div>
+          ${token ? `<span class="score-badge">${escapeHtml(shortAddress(token.address))}</span>` : ""}
+        </div>
+        ${keyValueList([
+          ["Token", token ? `${token.name} ${shortAddress(token.address)}` : "Not created"],
+          ["Currency", token?.metadata?.currency ?? "USD"],
+          ["Settlement", token?.metadata?.quoteToken ? shortAddress(token.metadata.quoteToken) : "pathUSD"],
+          ["Policy", policy ? `${policy.name} #${policy.id}` : "None"],
+          ["Admin", token?.metadata?.admin ?? "admin"],
+        ])}
+        <div class="button-row">
+          <button data-action="token-list">List Assets</button>
+          <button class="primary" data-action="token-inspect">Inspect Asset</button>
+        </div>
+      </section>
+
       <section class="tool-section wide">
         <div class="section-heading">
           <div>
-            <span class="label">Onboarding</span>
-            <h2>Create asset token</h2>
+            <span class="label">Create Token</span>
+            <h2>New TIP-20 asset</h2>
           </div>
         </div>
         <div class="form-grid three">
@@ -198,89 +144,59 @@ function renderAdmin() {
           <button class="primary" data-action="create-token">Create Asset Token</button>
         </div>
       </section>
+    </div>
+  `;
+}
 
+function renderAdminPoliciesTab(token, policy) {
+  const policyDoc = policy ? policyDocument(policy) : {};
+
+  return `
+    <div class="section-grid">
       <section class="tool-section">
         <div class="section-heading">
           <div>
-            <span class="label">Compliance Attachment</span>
-            <h2>Asset policy</h2>
+            <span class="label">Policy In Use</span>
+            <h2>${escapeHtml(policy?.name ?? "No policy attached")}</h2>
           </div>
+          ${policy ? `<span class="score-badge">#${escapeHtml(policy.id)}</span>` : ""}
         </div>
         ${keyValueList([
           ["Current asset", token ? `${token.name} ${shortAddress(token.address)}` : "Not created"],
           ["Attached policy", policy ? `${policy.name} #${policy.id}` : "None"],
+          ["Policy type", policy ? policy.type : "None"],
+          ["Owner", policy?.admin ?? "None"],
         ])}
         <div class="form-grid">
           ${select("configToken", "Asset", tokenOptions())}
           ${select("configPolicy", "Policy", policyOptions())}
           <button class="primary" data-action="attach-policy">Attach Policy</button>
-          <button data-action="go-compliance">Open Policy Studio</button>
+          <button data-action="policy-list">List Policies</button>
         </div>
       </section>
 
       <section class="tool-section">
         <div class="section-heading">
           <div>
-            <span class="label">Permissions</span>
-            <h2>TIP-20 roles</h2>
+            <span class="label">Create Policy</span>
+            <h2>New TIP-403 rule</h2>
           </div>
         </div>
         <div class="form-grid">
-          ${select("roleToken", "Asset", tokenOptions())}
-          ${select("roleTarget", "Holder", roleTargetOptions())}
-          ${select("roleName", "Role", [["issuer", "Issuer"], ["burn-blocked", "Burn"], ["pause", "Pause"], ["unpause", "Unpause"]])}
-          <button class="primary" data-action="grant-role">Grant Role</button>
-          <button data-action="revoke-role">Revoke Role</button>
-          <button data-action="token-roles-manager">Check Operator Roles</button>
+          ${input("policyName", "Policy Name", suggestedPolicyName())}
+          ${select("policyType", "Rule Type", [["whitelist", "Allow list"], ["blacklist", "Block list"]])}
+          ${select("policyAdmin", "Policy Owner", profileOptions("admin"))}
+          <button class="primary" data-action="create-policy">Create Policy</button>
+          <button data-action="policy-inspect">Inspect Policy</button>
         </div>
       </section>
 
-      <section class="tool-section wide">
-        <div class="section-heading">
-          <div>
-            <span class="label">Operator Setup</span>
-            <h2>Lifecycle contract</h2>
-          </div>
-        </div>
-        <div class="button-row">
-          <button data-action="manager-deploy">Deploy Operator</button>
-          <button class="primary" data-action="manager-grant-roles">Grant Operational Roles</button>
-          <button data-action="manager-allow-policy">Allow Operator In Policy</button>
-          <button data-action="manager-faucet">Fund Operator Reserves</button>
-          <button data-action="manager-inspect">Inspect Operator</button>
-        </div>
-      </section>
-    </div>
-  `;
-
-  wireAdminActions();
-  bind("go-compliance", () => switchView("compliance"));
-}
-
-function renderCompliance() {
-  const policy = selectedPolicy();
-  const policyDoc = policy ? policyDocument(policy) : {};
-
-  workspacePanel.innerHTML = `
-    <div class="page-heading">
-      <div>
-        <span class="eyebrow">Compliance control plane</span>
-        <h2>Policy studio</h2>
-      </div>
-      <div class="button-row">
-        <button data-action="policy-list">List Policies</button>
-        <button data-action="policy-inspect">Inspect Policy</button>
-      </div>
-    </div>
-
-    <div class="section-grid">
       <section class="tool-section wide">
         <div class="section-heading">
           <div>
             <span class="label">Policy Document</span>
-            <h2>${escapeHtml(policy?.name ?? "No policy")}</h2>
+            <h2>Readable rule set</h2>
           </div>
-          ${policy ? `<span class="score-badge">#${escapeHtml(policy.id)}</span>` : ""}
         </div>
         <div class="policy-layout">
           <div class="policy-visual">
@@ -290,29 +206,14 @@ function renderCompliance() {
         </div>
       </section>
 
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Create</span>
-            <h2>New policy</h2>
-          </div>
-        </div>
-        <div class="form-grid">
-          ${input("policyName", "Policy Name", "usdv-kyc")}
-          ${select("policyType", "Rule Type", [["whitelist", "Allow list"], ["blacklist", "Block list"]])}
-          ${select("policyAdmin", "Policy Owner", profileOptions("admin"))}
-          <button class="primary" data-action="create-policy">Create Policy</button>
-        </div>
-      </section>
-
-      <section class="tool-section">
+      <section class="tool-section wide">
         <div class="section-heading">
           <div>
             <span class="label">Membership</span>
-            <h2>Investor access</h2>
+            <h2>Address eligibility</h2>
           </div>
         </div>
-        <div class="form-grid">
+        <div class="form-grid four">
           ${select("policyEditName", "Policy", simplePolicyOptions())}
           ${select("policyTarget", "Address", profileOptions("alice"))}
           <button class="primary" data-action="policy-allow">Allow</button>
@@ -322,62 +223,107 @@ function renderCompliance() {
           <button data-action="policy-check">Check</button>
         </div>
       </section>
+    </div>
+  `;
+}
 
+function renderAdminRolesTab(token) {
+  return `
+    <div class="section-grid">
       <section class="tool-section wide">
         <div class="section-heading">
           <div>
-            <span class="label">Simulator</span>
-            <h2>Policy decision preview</h2>
+            <span class="label">Role Permissions</span>
+            <h2>TIP-20 access control</h2>
+          </div>
+          <button data-action="token-roles-manager">Check Operator Roles</button>
+        </div>
+        ${table(["Role", "What It Controls", "Operator Status"], roleRows(token))}
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Grant / Revoke</span>
+            <h2>Assign role holder</h2>
           </div>
         </div>
-        <div class="simulator-grid">
-          <div class="preview-card">
-            <span class="label">Simple Policy</span>
-            <h3>Address eligibility</h3>
-            <div class="form-grid">
-              ${select("simSimplePolicy", "Allow/Block Policy", simplePolicyOptions())}
-              ${select("simSimpleTarget", "Address", profileOptions("alice"))}
-              <button class="primary" data-action="simulate-simple-policy">Check Address</button>
-              <button data-action="attach-simple-policy">Attach Simple Policy</button>
-            </div>
+        <div class="form-grid">
+          ${select("roleToken", "Asset", tokenOptions())}
+          ${select("roleTarget", "Holder", roleTargetOptions())}
+          ${select("roleName", "Role", tip20RoleOptions())}
+          <button class="primary" data-action="grant-role">Grant Role</button>
+          <button data-action="revoke-role">Revoke Role</button>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Operator Setup</span>
+            <h2>Manager contract</h2>
           </div>
-          <div class="preview-card">
-            <span class="label">Compound Policy</span>
-            <h3>Transfer / mint decision</h3>
-            <div class="form-grid">
-              ${select("simCompoundPolicy", "Compound Policy", compoundPolicyOptions())}
-              ${select("simCompoundAction", "Action", [["transfer", "Transfer"], ["mint", "Mint"], ["redeem", "Redeem"]])}
-              ${select("simCompoundSender", "Sender", profileOptions("alice"))}
-              ${select("simCompoundRecipient", "Recipient", profileOptions("bob"))}
-              <button class="primary" data-action="simulate-compound-policy">Preview Decision</button>
-              <button data-action="attach-compound-policy">Attach Compound Policy</button>
-            </div>
-          </div>
+        </div>
+        ${keyValueList([
+          ["Operator", state.manager ? shortAddress(state.manager.address) : "Not deployed"],
+          ["Signer", "Admin"],
+          ["Role bundle", "issuer, burn, pause, unpause"],
+        ])}
+        <div class="button-stack">
+          <button data-action="manager-deploy">Deploy Operator</button>
+          <button class="primary" data-action="manager-grant-roles">Grant Operational Roles</button>
+          <button data-action="manager-allow-policy">Allow Operator In Policy</button>
+          <button data-action="manager-inspect">Inspect Operator</button>
         </div>
       </section>
     </div>
   `;
+}
 
-  wireComplianceActions();
+function wireAdminTabs() {
+  document.querySelectorAll("[data-admin-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      adminTab = button.dataset.adminTab;
+      render();
+    });
+  });
 }
 
 function renderOperator() {
-  const checks = readinessChecks();
   const token = selectedToken();
 
   workspacePanel.innerHTML = `
     <div class="page-heading">
       <div>
         <span class="eyebrow">Issuance operator</span>
-        <h2>Lifecycle operations</h2>
+        <h2>Manage supply lifecycle</h2>
       </div>
       <div class="button-row">
         <button data-action="manager-inspect">Inspect Operator</button>
         <button data-action="manager-roles">Check Roles</button>
-        <button data-action="manager-balance">Balances</button>
+        <button data-action="manager-balance">Check Balances</button>
       </div>
     </div>
 
+    ${subnav("operator", [
+      ["permissions", "Roles"],
+      ["supply", "Supply Operations"],
+      ["reserves", "Reserves"],
+    ], operatorTab)}
+
+    ${operatorTab === "permissions" ? renderOperatorPermissionsTab(token) : ""}
+    ${operatorTab === "supply" ? renderOperatorSupplyTab(token) : ""}
+    ${operatorTab === "reserves" ? renderOperatorReservesTab(token) : ""}
+  `;
+
+  wireOperatorActions();
+  wireOperatorTabs();
+}
+
+function renderOperatorPermissionsTab(token) {
+  const checks = readinessChecks();
+
+  return `
     <div class="section-grid">
       <section class="tool-section wide">
         <div class="section-heading">
@@ -391,6 +337,114 @@ function renderOperator() {
         </div>
       </section>
 
+      <section class="tool-section wide">
+        <div class="section-heading">
+          <div>
+            <span class="label">Role Permissions</span>
+            <h2>Operator grants</h2>
+          </div>
+          <button data-action="manager-roles">List Role Permissions</button>
+        </div>
+        ${table(["Role", "What It Controls", "Operator Status"], roleRows(token))}
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Role Setup</span>
+            <h2>Operator permissions</h2>
+          </div>
+        </div>
+        ${keyValueList([
+          ["Signer", "Admin"],
+          ["Target", state.manager ? shortAddress(state.manager.address) : "Operator not deployed"],
+          ["Bundle", "issuer, burn, pause, unpause"],
+        ])}
+        <div class="form-grid">
+          ${select("operatorRoleName", "Role", tip20RoleOptions())}
+          <button class="primary" data-action="operator-grant-role">Grant Selected Role</button>
+          <button data-action="operator-grant-roles">Grant Operational Roles</button>
+          <button data-action="operator-allow-policy">Allow In Policy</button>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Operator Contract</span>
+            <h2>Deployment</h2>
+          </div>
+        </div>
+        ${keyValueList([
+          ["Address", state.manager ? shortAddress(state.manager.address) : "Not deployed"],
+          ["Admin", state.manager?.metadata?.admin ?? "admin"],
+          ["Managed asset", token?.name ?? "None"],
+        ])}
+        <div class="button-stack">
+          <button data-action="manager-deploy">Deploy Operator</button>
+          <button class="primary" data-action="manager-inspect">Inspect Operator</button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderOperatorSupplyTab(token) {
+  return `
+    <div class="section-grid">
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Increase Supply</span>
+            <h2>Offline subscribe</h2>
+          </div>
+          <span class="score-badge">Admin-signed</span>
+        </div>
+        <div class="form-grid">
+          ${select("adminSubRecipient", "Investor", profileOptions("bob"))}
+          ${input("adminSubAmount", "Amount", "5")}
+          ${input("adminSubMemo", "Memo", "offchain-settlement")}
+          <button class="primary" data-action="admin-subscribe">Issue Asset</button>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
+            <span class="label">Decrease Supply</span>
+            <h2>Redeem asset</h2>
+          </div>
+          <span class="score-badge">Investor-signed</span>
+        </div>
+        <div class="form-grid">
+          ${select("operatorRedeemInvestor", "Investor", profileOptions("bob"))}
+          ${input("operatorRedeemAmount", "Amount", "2")}
+          <button class="primary" data-action="operator-redeem">Redeem Asset</button>
+          <button data-action="operator-user-balance">Check Investor Balance</button>
+        </div>
+      </section>
+
+      <section class="tool-section wide">
+        <div class="section-heading">
+          <div>
+            <span class="label">Supply State</span>
+            <h2>${escapeHtml(token?.name ?? "Asset")} lifecycle</h2>
+          </div>
+        </div>
+        <div class="trace-grid">
+          ${traceStep("1", "Offline order", "Admin records completed settlement and selects an investor recipient.")}
+          ${traceStep("2", "Operator mint", "Manager contract calls TIP-20 mintWithMemo using its issuer permission.")}
+          ${traceStep("3", "Investor redeem", "Investor approves USDV and manager burns through burnWithMemo.")}
+          ${traceStep("4", "Supply receipt", "Each action returns total supply and balance deltas.")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderOperatorReservesTab(token) {
+  return `
+    <div class="section-grid">
       <section class="tool-section">
         <div class="section-heading">
           <div>
@@ -409,144 +463,47 @@ function renderOperator() {
         </div>
       </section>
 
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Role Setup</span>
-            <h2>Operator permissions</h2>
-          </div>
-        </div>
-        ${keyValueList([
-          ["Signer", "Admin"],
-          ["Target", state.manager ? shortAddress(state.manager.address) : "Operator not deployed"],
-          ["Bundle", "issuer, burn, pause, unpause"],
-        ])}
-        <div class="form-grid">
-          ${select("operatorRoleName", "Role", [["issuer", "Issuer"], ["burn-blocked", "Burn"], ["pause", "Pause"], ["unpause", "Unpause"]])}
-          <button class="primary" data-action="operator-grant-role">Grant Selected Role</button>
-          <button data-action="operator-grant-roles">Grant Operational Roles</button>
-          <button data-action="operator-allow-policy">Allow In Policy</button>
-        </div>
-      </section>
-
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Offchain Settlement</span>
-            <h2>Admin issue</h2>
-          </div>
-        </div>
-        <div class="form-grid">
-          ${select("adminSubRecipient", "Investor", profileOptions("bob"))}
-          ${input("adminSubAmount", "Amount", "5")}
-          ${input("adminSubMemo", "Memo", "offchain-settlement")}
-          <button class="primary" data-action="admin-subscribe">Issue Asset</button>
-        </div>
-      </section>
-
       <section class="tool-section wide">
         <div class="section-heading">
           <div>
-            <span class="label">Execution Model</span>
-            <h2>Lifecycle trace</h2>
+            <span class="label">Reserve Model</span>
+            <h2>Current balances</h2>
           </div>
         </div>
         <div class="trace-grid">
-          ${traceStep("1", "Investor approval", "Investor authorizes the operator to pull settlement tokens or asset tokens.")}
-          ${traceStep("2", "Operator execution", "Operator collects funds, checks token permissions, then calls the asset token.")}
-          ${traceStep("3", "Asset update", "TIP-20 mint or burn changes balances and total supply.")}
-          ${traceStep("4", "Receipt", "The POC records transaction hashes and before/after balances.")}
+          ${traceStep("1", "pathUSD reserve", "Manager holds settlement tokens used for redemption payouts.")}
+          ${traceStep("2", "USDV reserve", "Manager may temporarily receive USDV before burn during redeem.")}
+          ${traceStep("3", "Faucet", "Testnet funding tops up operator settlement capacity.")}
+          ${traceStep("4", "Balance check", "Reads USDV and pathUSD balances for the manager contract.")}
         </div>
       </section>
     </div>
   `;
-
-  wireOperatorActions();
 }
 
-function renderInvestors() {
-  const policy = selectedSimplePolicy();
-  const rows = investorAccounts().map((account) => [
-    account.name,
-    account.kind,
-    html(`<span class="mono">${escapeHtml(account.address)}</span>`),
-    memberStatus(account, policy),
-    html(`<button data-balance="${escapeAttr(account.name)}">Balance</button>`),
-  ]);
-
-  workspacePanel.innerHTML = `
-    <div class="page-heading">
-      <div>
-        <span class="eyebrow">Investor operations</span>
-        <h2>Eligibility and balances</h2>
-      </div>
-      <div class="button-row">
-        <button data-action="policy-list">Policy List</button>
-        <button data-action="go-compliance">Policy Studio</button>
-      </div>
-    </div>
-
-    <div class="section-grid">
-      <section class="tool-section wide">
-        ${table(["Investor", "Type", "Address", "Eligibility", "Action"], rows)}
-      </section>
-
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Eligibility</span>
-            <h2>Manage access</h2>
-          </div>
-        </div>
-        <div class="form-grid">
-          ${select("investorPolicy", "Policy", simplePolicyOptions())}
-          ${select("investorTarget", "Investor", profileOptions("alice"))}
-          <button class="primary" data-action="investor-allow">Allow</button>
-          <button data-action="investor-remove">Remove</button>
-          <button data-action="investor-check">Check</button>
-        </div>
-      </section>
-
-      <section class="tool-section">
-        <div class="section-heading">
-          <div>
-            <span class="label">Balances</span>
-            <h2>Account view</h2>
-          </div>
-        </div>
-        <div class="form-grid">
-          ${select("balanceTarget", "Account", profileOptions("alice"))}
-          ${select("balanceAsset", "Asset", [["all", "All"], [selectedTokenName(), selectedTokenName()], ["pathUSD", "pathUSD"]])}
-          <button class="primary" data-action="investor-balance">Check Balance</button>
-        </div>
-      </section>
-    </div>
-  `;
-
-  bind("policy-list", () => run("admin", "policy", ["list"]));
-  bind("go-compliance", () => switchView("compliance"));
-  bind("investor-allow", () => run("admin", "policy", ["allow", value("investorTarget"), value("investorPolicy")]));
-  bind("investor-remove", () => run("admin", "policy", ["remove", value("investorTarget"), value("investorPolicy")]));
-  bind("investor-check", () => run("admin", "policy", ["check", value("investorTarget"), value("investorPolicy")]));
-  bind("investor-balance", () => run("admin", "balance", balanceArgs(value("balanceTarget"), value("balanceAsset"))));
-
-  document.querySelectorAll("[data-balance]").forEach((button) => {
-    button.addEventListener("click", () => run("admin", "balance", [button.dataset.balance]));
+function wireOperatorTabs() {
+  document.querySelectorAll("[data-operator-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      operatorTab = button.dataset.operatorTab;
+      render();
+    });
   });
 }
 
-function renderSimulation() {
-  const other = simulationActor === "alice" ? "bob" : "alice";
+function renderUsers() {
+  const other = userActor === "alice" ? "bob" : "alice";
+  const policy = selectedSimplePolicy();
+  const actorAccount = state.accounts.find((account) => account.name === userActor);
 
   workspacePanel.innerHTML = `
     <div class="page-heading">
       <div>
-        <span class="eyebrow">Simulation mode</span>
-        <h2>Act as ${capitalize(simulationActor)}</h2>
+        <span class="eyebrow">User accounts</span>
+        <h2>${capitalize(userActor)} workspace</h2>
       </div>
       <div class="segmented">
-        <button class="${simulationActor === "alice" ? "is-active" : ""}" data-sim="alice">Alice</button>
-        <button class="${simulationActor === "bob" ? "is-active" : ""}" data-sim="bob">Bob</button>
+        <button class="${userActor === "alice" ? "is-active" : ""}" data-user-actor="alice">Alice</button>
+        <button class="${userActor === "bob" ? "is-active" : ""}" data-user-actor="bob">Bob</button>
       </div>
     </div>
 
@@ -554,14 +511,16 @@ function renderSimulation() {
       <section class="tool-section">
         <div class="section-heading">
           <div>
-            <span class="label">Wallet</span>
-            <h2>${capitalize(simulationActor)} balances</h2>
+            <span class="label">Account</span>
+            <h2>${capitalize(userActor)}</h2>
           </div>
+          <span class="score-badge">${escapeHtml(memberStatus(actorAccount, policy))}</span>
         </div>
-        ${actorSummary(simulationActor)}
+        ${actorSummary(userActor)}
         <div class="button-row">
-          <button class="primary" data-action="sim-balance">Balance</button>
-          <button data-action="sim-history">History</button>
+          <button class="primary" data-action="user-balance">Check Balances</button>
+          <button data-action="user-history">History</button>
+          <button data-action="user-policy-check">Check Policy</button>
         </div>
       </section>
 
@@ -569,47 +528,66 @@ function renderSimulation() {
         <div class="section-heading">
           <div>
             <span class="label">Primary Market</span>
-            <h2>Subscribe / Redeem</h2>
+            <h2>Subscribe / redeem</h2>
           </div>
         </div>
         <div class="form-grid">
-          ${input("subscribeAmount", "Subscribe Amount", "10")}
-          <button class="primary" data-action="subscribe">Subscribe</button>
-          ${input("redeemAmount", "Redeem Amount", "2")}
-          <button data-action="redeem">Redeem</button>
+          ${input("userSubscribeAmount", "Subscribe Amount", "10")}
+          <button class="primary" data-action="user-subscribe">Subscribe</button>
+          ${input("userRedeemAmount", "Redeem Amount", "2")}
+          <button data-action="user-redeem">Redeem</button>
         </div>
       </section>
 
       <section class="tool-section wide">
         <div class="section-heading">
           <div>
-            <span class="label">Secondary Transfer</span>
+            <span class="label">Transfer</span>
             <h2>Send asset</h2>
           </div>
         </div>
         <div class="form-grid four">
-          ${input("sendAmount", "Amount", "1")}
-          ${select("sendToken", "Asset", [[selectedTokenName(), selectedTokenName()], ["pathUSD", "pathUSD"]])}
-          ${select("sendTo", "Recipient", profileOptions(other))}
-          ${input("sendMemo", "Memo", "invoice-001")}
-          <button class="primary" data-action="send">Send</button>
+          ${input("userSendAmount", "Amount", "1")}
+          ${select("userSendToken", "Asset", [[selectedTokenName(), selectedTokenName()], ["pathUSD", "pathUSD"]])}
+          ${select("userSendTo", "Recipient", profileOptions(other))}
+          ${input("userSendMemo", "Memo", "invoice-001")}
+          <button class="primary" data-action="user-send">Send</button>
         </div>
+      </section>
+
+      <section class="tool-section wide">
+        <div class="section-heading">
+          <div>
+            <span class="label">User Directory</span>
+            <h2>Alice and Bob</h2>
+          </div>
+        </div>
+        ${table(["User", "Address", "Policy Status", "Action"], userRows(policy))}
       </section>
     </div>
   `;
 
-  document.querySelectorAll("[data-sim]").forEach((button) => {
+  wireUserActions();
+}
+
+function wireUserActions() {
+  document.querySelectorAll("[data-user-actor]").forEach((button) => {
     button.addEventListener("click", () => {
-      simulationActor = button.dataset.sim;
+      userActor = button.dataset.userActor;
       render();
     });
   });
 
-  bind("sim-balance", () => run(simulationActor, "balance", []));
-  bind("sim-history", () => run(simulationActor, "history", ["10"]));
-  bind("subscribe", () => run(simulationActor, "subscribe", [value("subscribeAmount")]));
-  bind("redeem", () => run(simulationActor, "redeem", [value("redeemAmount")]));
-  bind("send", () => run(simulationActor, "send", [value("sendAmount"), value("sendToken"), "to", value("sendTo"), "--memo", value("sendMemo")]));
+  bind("user-balance", () => run(userActor, "balance", []));
+  bind("user-history", () => run(userActor, "history", ["10"]));
+  bind("user-policy-check", () => run("admin", "policy", ["check", userActor, selectedSimplePolicyName()]));
+  bind("user-subscribe", () => run(userActor, "subscribe", [value("userSubscribeAmount")]));
+  bind("user-redeem", () => run(userActor, "redeem", [value("userRedeemAmount")]));
+  bind("user-send", () => run(userActor, "send", [value("userSendAmount"), value("userSendToken"), "to", value("userSendTo"), "--memo", value("userSendMemo")]));
+
+  document.querySelectorAll("[data-user-balance]").forEach((button) => {
+    button.addEventListener("click", () => run(button.dataset.userBalance, "balance", []));
+  });
 }
 
 function renderActivity() {
@@ -623,6 +601,7 @@ function renderActivity() {
         <button data-action="refresh-activity">Refresh</button>
         <button data-action="admin-history">Admin History</button>
         <button data-action="alice-history">Alice History</button>
+        <button data-action="bob-history">Bob History</button>
       </div>
     </div>
 
@@ -634,6 +613,7 @@ function renderActivity() {
   bind("refresh-activity", () => refreshState());
   bind("admin-history", () => run("admin", "history", ["10"]));
   bind("alice-history", () => run("alice", "history", ["10"]));
+  bind("bob-history", () => run("bob", "history", ["10"]));
 }
 
 function wireAdminActions() {
@@ -715,6 +695,8 @@ function wireOperatorActions() {
   bind("operator-grant-roles", () => run("admin", "manager", ["grant-operational-roles"]));
   bind("operator-allow-policy", () => run("admin", "manager", ["allow-policy", selectedSimplePolicyName()]));
   bind("admin-subscribe", () => run("admin", "admin-subscribe", [value("adminSubRecipient"), value("adminSubAmount"), "--memo", value("adminSubMemo")]));
+  bind("operator-redeem", () => run(value("operatorRedeemInvestor"), "redeem", [value("operatorRedeemAmount")]));
+  bind("operator-user-balance", () => run(value("operatorRedeemInvestor"), "balance", []));
 }
 
 async function run(actor, command, args, label) {
@@ -772,6 +754,18 @@ function select(id, label, options, selectedValue) {
         }).join("")}
       </select>
     </label>
+  `;
+}
+
+function subnav(scope, tabs, active) {
+  return `
+    <div class="subnav" aria-label="${escapeAttr(scope)} sections">
+      ${tabs.map(([id, label]) => `
+        <button type="button" class="${active === id ? "is-active" : ""}" data-${escapeAttr(scope)}-tab="${escapeAttr(id)}">
+          ${escapeHtml(label)}
+        </button>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -932,6 +926,56 @@ function traceStep(number, title, detail) {
       <p>${escapeHtml(detail)}</p>
     </div>
   `;
+}
+
+function tip20RoleOptions() {
+  return tip20Roles().map((role) => [role.id, role.label]);
+}
+
+function tip20Roles() {
+  return [
+    { id: "issuer", label: "Issuer", detail: "Mint asset supply" },
+    { id: "burn-blocked", label: "Burn", detail: "Burn asset supply" },
+    { id: "pause", label: "Pause", detail: "Pause token activity" },
+    { id: "unpause", label: "Unpause", detail: "Resume token activity" },
+  ];
+}
+
+function roleRows(token) {
+  return tip20Roles().map((role) => [
+    role.label,
+    role.detail,
+    roleStatus(role.id, token),
+  ]);
+}
+
+function roleStatus(role, token) {
+  if (!state.manager) {
+    return "Operator not deployed";
+  }
+
+  const metadata = token?.metadata ?? {};
+  const bundle = metadata.managerOperationalRoles ?? state.manager?.metadata?.operationalRoles ?? "";
+  const directStatus = metadata[`role.${role}.manager.status`];
+
+  if (directStatus === "granted" || bundle.split(",").includes(role)) {
+    return "Granted to operator";
+  }
+
+  return "Not recorded";
+}
+
+function userRows(policy) {
+  return ["alice", "bob"].map((name) => {
+    const account = state.accounts.find((item) => item.name === name);
+
+    return [
+      capitalize(name),
+      html(`<span class="mono">${escapeHtml(account ? shortAddress(account.address) : "missing")}</span>`),
+      memberStatus(account, policy),
+      html(`<button data-user-balance="${escapeAttr(name)}">Balance</button>`),
+    ];
+  });
 }
 
 function activityList(limit) {
@@ -1262,6 +1306,7 @@ function eligibleInvestors(policy) {
 }
 
 function memberStatus(account, policy) {
+  if (!account) return "Unknown";
   if (!policy) return "No policy";
 
   const member = Object.values(policy.members).find((item) => sameAddress(item.address, account.address));
@@ -1291,6 +1336,22 @@ function nextDemoSymbol() {
   }
 
   return symbol;
+}
+
+function suggestedPolicyName() {
+  if (!state.policies.some((policy) => policy.name === "usdv-kyc")) {
+    return "usdv-kyc";
+  }
+
+  let index = state.policies.length + 1;
+  let name = `policy-${index}`;
+
+  while (state.policies.some((policy) => policy.name === name)) {
+    index += 1;
+    name = `policy-${index}`;
+  }
+
+  return name;
 }
 
 function value(id) {

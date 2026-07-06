@@ -182,6 +182,30 @@ code,
   font-weight: 700;
 }
 
+.subnav {
+  display: flex;
+  gap: 6px;
+  margin: -2px 0 14px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.subnav button {
+  min-height: 34px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.subnav button.is-active {
+  border-color: var(--border);
+  background: #ffffff;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(380px, 0.42fr);
@@ -640,6 +664,11 @@ pre {
   font-weight: 700;
 }
 
+.inline-table td:last-child,
+.inline-table th:last-child {
+  text-align: right;
+}
+
 .activity-list {
   display: grid;
   gap: 8px;
@@ -747,7 +776,8 @@ pre {
   }
 
   .segmented button,
-  .nav-button {
+  .nav-button,
+  .subnav button {
     width: auto;
   }
 }
