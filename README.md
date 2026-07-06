@@ -222,13 +222,16 @@ history
 
 ## Play With The Web Client
 
-The web client is another local client for the same POC state. It keeps private keys on the Node side and exposes actor tabs for:
+The web client is another local client for the same POC state. It keeps private keys on the Node side and presents an issuer-console workflow:
 
 ```text
-admin
-manager
-alice
-bob
+Overview
+Asset Admin
+Compliance
+Operator
+Investors
+Simulation
+Activity
 ```
 
 Start it:
@@ -243,11 +246,15 @@ Then open:
 http://localhost:5177
 ```
 
-Use the tabs to simulate each actor:
+The main tabs use asset-issuer language:
 
-- Admin creates tokens, creates policies, attaches policies, and grants manager roles.
-- Manager inspects lifecycle setup and runs admin-subscribe style flows through the admin signer.
-- Alice and Bob can view balances, subscribe, redeem, send, and inspect their local history.
+- Overview shows operational readiness and recent receipts.
+- Asset Admin creates TIP-20 asset tokens, attaches policies, and grants roles.
+- Compliance shows TIP-403 policies as a visual rule set and JSON document.
+- Operator shows lifecycle readiness, reserves, and issuance actions.
+- Investors manages eligibility and balances.
+- Simulation lets you act as Alice or Bob without making actors the main UX.
+- Activity aggregates local CLI and web receipts.
 
 The web server reuses the same CLI command handlers through a small local HTTP API:
 

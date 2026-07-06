@@ -3,48 +3,59 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Asset Issuer POC</title>
+    <title>Asset Issuer Console</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
         <div>
-          <h1>Asset Issuer POC</h1>
-          <p id="networkLine">Tempo Moderato</p>
+          <span class="eyebrow">Tempo Moderato POC</span>
+          <h1>Asset Issuer Console</h1>
+          <p id="networkLine">Loading workspace</p>
         </div>
         <div class="topbar-actions">
           <button id="refreshButton" type="button">Refresh</button>
         </div>
       </header>
 
-      <section class="status-grid" aria-label="Workspace status">
+      <section class="status-grid" aria-label="Issuer status">
         <div class="status-panel">
-          <span class="label">Token</span>
-          <strong id="tokenStatus">No token</strong>
+          <span class="label">Asset</span>
+          <strong id="tokenStatus">No asset token</strong>
         </div>
         <div class="status-panel">
-          <span class="label">Policy</span>
-          <strong id="policyStatus">No policy</strong>
+          <span class="label">Compliance</span>
+          <strong id="policyStatus">No policy attached</strong>
         </div>
         <div class="status-panel">
-          <span class="label">Manager</span>
+          <span class="label">Operator</span>
           <strong id="managerStatus">Not deployed</strong>
+        </div>
+        <div class="status-panel">
+          <span class="label">Investors</span>
+          <strong id="investorStatus">No eligible investors</strong>
         </div>
       </section>
 
-      <nav class="actor-tabs" aria-label="Actors">
-        <button class="tab-button is-active" type="button" data-tab="admin">Admin</button>
-        <button class="tab-button" type="button" data-tab="manager">Manager</button>
-        <button class="tab-button" type="button" data-tab="alice">Alice</button>
-        <button class="tab-button" type="button" data-tab="bob">Bob</button>
+      <nav class="primary-nav" aria-label="Issuer sections">
+        <button class="nav-button is-active" type="button" data-view="overview">Overview</button>
+        <button class="nav-button" type="button" data-view="admin">Asset Admin</button>
+        <button class="nav-button" type="button" data-view="compliance">Compliance</button>
+        <button class="nav-button" type="button" data-view="operator">Operator</button>
+        <button class="nav-button" type="button" data-view="investors">Investors</button>
+        <button class="nav-button" type="button" data-view="simulation">Simulation</button>
+        <button class="nav-button" type="button" data-view="activity">Activity</button>
       </nav>
 
       <section class="content-grid">
-        <section class="actor-panel" id="actorPanel"></section>
-        <aside class="output-panel" aria-label="Command output">
-          <div class="output-header">
-            <h2>Output</h2>
+        <section class="workspace-panel" id="workspacePanel"></section>
+        <aside class="receipt-panel" aria-label="Execution receipts">
+          <div class="receipt-header">
+            <div>
+              <span class="label">Execution Receipt</span>
+              <h2>Latest action</h2>
+            </div>
             <button id="clearOutputButton" type="button">Clear</button>
           </div>
           <pre id="output">Ready.</pre>

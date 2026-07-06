@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { getTempoNetworkConfig, loadPocEnv } from "../../cli/config/index.js";
 import type { ReplContext } from "../../cli/repl/index.js";
 import {
   ensureLocalStateLayout,
+  getStatePaths,
   loadAccountsState,
   loadDeploymentsState,
   loadHistoryState,
@@ -24,6 +25,8 @@ import {
   savePoliciesState,
   saveSessionState,
   type AccountProfile,
+  type HistoryEntry,
+  type HistoryState,
   type NetworkName,
 } from "../../cli/state/index.js";
 import { createTempoPublicClient } from "../../cli/tempo/index.js";
@@ -214,7 +217,34 @@ async function readWebState() {
         metadata: manager.metadata ?? {},
       }
       : undefined,
+    activity: await readRecentActivity(),
   };
+}
+
+async function readRecentActivity(): Promise<HistoryEntry[]> {
+  const paths = getStatePaths(repoRoot);
+
+  if (!existsSync(paths.historyDir)) {
+    return [];
+  }
+
+  const files = await readdir(paths.historyDir);
+  const historyFiles = files.filter((file) => file.endsWith(".history.json"));
+  const entries: HistoryEntry[] = [];
+
+  for (const file of historyFiles) {
+    try {
+      const raw = await readFile(join(paths.historyDir, file), "utf8");
+      const history = JSON.parse(raw) as HistoryState;
+      entries.push(...history.entries);
+    } catch {
+      // Ignore one malformed local history file so the UI can still load.
+    }
+  }
+
+  return entries
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, 25);
 }
 
 function createOutputBuffer(): OutputBuffer {
