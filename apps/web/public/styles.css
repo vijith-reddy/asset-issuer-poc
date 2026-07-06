@@ -228,6 +228,135 @@ pre {
   background: #f9fbfc;
 }
 
+.receipt-feed {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 12px;
+  overflow: auto;
+  background: #f9fbfc;
+}
+
+.receipt-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 14px;
+  text-align: center;
+}
+
+.receipt-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+
+.receipt-card.is-error {
+  border-color: #f0b8b2;
+  background: #fff7f6;
+}
+
+.receipt-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.receipt-card h3 {
+  margin: 3px 0 0;
+  font-size: 17px;
+}
+
+.receipt-command {
+  display: block;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.receipt-status {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--ok-bg);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 9px;
+}
+
+.receipt-card.is-error .receipt-status {
+  background: #fde3df;
+  color: var(--danger);
+}
+
+.receipt-summary {
+  margin: 10px 0;
+  line-height: 1.4;
+}
+
+.receipt-section {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  margin-top: 9px;
+}
+
+.receipt-section ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.receipt-section li {
+  margin: 5px 0;
+  line-height: 1.35;
+}
+
+.receipt-lines {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.receipt-tx {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(86px, 0.6fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.receipt-tx button {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.raw-receipt {
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.raw-receipt summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.raw-receipt pre {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 8px;
+  max-height: 260px;
+}
+
 .json-view {
   min-height: 260px;
   border: 1px solid var(--border);
@@ -597,6 +726,8 @@ pre {
   .hero-panel,
   .page-heading,
   .section-heading,
+  .receipt-card-header,
+  .receipt-tx,
   .activity-item {
     display: grid;
   }

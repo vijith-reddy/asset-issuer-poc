@@ -2,6 +2,7 @@ const views = ["overview", "admin", "compliance", "operator", "investors", "simu
 let activeView = "overview";
 let simulationActor = "alice";
 let state = null;
+let receiptCount = 0;
 
 const output = document.querySelector("#output");
 const workspacePanel = document.querySelector("#workspacePanel");
@@ -24,7 +25,17 @@ refreshButton.addEventListener("click", async () => {
 });
 
 clearOutputButton.addEventListener("click", () => {
-  output.textContent = "Ready.";
+  output.innerHTML = `<div class="receipt-empty">Receipts will appear here after an action runs.</div>`;
+  receiptCount = 0;
+});
+
+output.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy]");
+
+  if (!button) return;
+
+  await navigator.clipboard?.writeText(button.dataset.copy);
+  button.textContent = "Copied";
 });
 
 await refreshState();
@@ -401,6 +412,26 @@ function renderOperator() {
       <section class="tool-section">
         <div class="section-heading">
           <div>
+            <span class="label">Role Setup</span>
+            <h2>Operator permissions</h2>
+          </div>
+        </div>
+        ${keyValueList([
+          ["Signer", "Admin"],
+          ["Target", state.manager ? shortAddress(state.manager.address) : "Operator not deployed"],
+          ["Bundle", "issuer, burn, pause, unpause"],
+        ])}
+        <div class="form-grid">
+          ${select("operatorRoleName", "Role", [["issuer", "Issuer"], ["burn-blocked", "Burn"], ["pause", "Pause"], ["unpause", "Unpause"]])}
+          <button class="primary" data-action="operator-grant-role">Grant Selected Role</button>
+          <button data-action="operator-grant-roles">Grant Operational Roles</button>
+          <button data-action="operator-allow-policy">Allow In Policy</button>
+        </div>
+      </section>
+
+      <section class="tool-section">
+        <div class="section-heading">
+          <div>
             <span class="label">Offchain Settlement</span>
             <h2>Admin issue</h2>
           </div>
@@ -680,6 +711,9 @@ function wireOperatorActions() {
   bind("manager-roles", () => run("manager", "token", ["roles", selectedTokenName(), "manager"]));
   bind("manager-balance", () => run("manager", "balance", state.manager ? [state.manager.address] : ["manager"]));
   bind("manager-faucet", () => run("manager", "manager", ["faucet"]));
+  bind("operator-grant-role", () => run("admin", "token", ["grant-role", selectedTokenName(), "manager", value("operatorRoleName")]));
+  bind("operator-grant-roles", () => run("admin", "manager", ["grant-operational-roles"]));
+  bind("operator-allow-policy", () => run("admin", "manager", ["allow-policy", selectedSimplePolicyName()]));
   bind("admin-subscribe", () => run("admin", "admin-subscribe", [value("adminSubRecipient"), value("adminSubAmount"), "--memo", value("adminSubMemo")]));
 }
 
@@ -972,8 +1006,126 @@ function renderCell(cell) {
 }
 
 function appendOutput(text) {
-  output.textContent = output.textContent === "Ready." ? text.trimStart() : `${text.trimStart()}\n\n${output.textContent}`;
+  if (receiptCount === 0) {
+    output.innerHTML = "";
+  }
+
+  output.insertAdjacentHTML("afterbegin", receiptCard(parseReceipt(text)));
+  receiptCount += 1;
   output.scrollTop = 0;
+}
+
+function parseReceipt(text) {
+  const raw = text.trim();
+  const [heading = "Action", ...rest] = raw.split("\n");
+  const lines = rest.map((line) => line.trimEnd()).filter(Boolean);
+  const hasError = /^Error:/m.test(raw) || /reverted|not authorized|blocked|failed/i.test(raw);
+  const txs = [];
+  const balances = [];
+  const flow = [];
+  const details = [];
+  let inTrace = false;
+
+  for (const line of lines) {
+    if (line.trim() === "trace:") {
+      inTrace = true;
+      continue;
+    }
+
+    const tx = line.match(/^\s*([^:]+):\s*(0x[a-fA-F0-9]{64})$/);
+
+    if (tx) {
+      txs.push({ label: tx[1].trim(), hash: tx[2] });
+      continue;
+    }
+
+    if (inTrace || /^\s*(\d+\.|-)\s+/.test(line)) {
+      flow.push(line.trim());
+      continue;
+    }
+
+    if (/balance|USDV:|pathUSD:|total supply|->/.test(line)) {
+      balances.push(line.trim());
+      continue;
+    }
+
+    details.push(line.trim());
+  }
+
+  return {
+    title: receiptTitle(heading),
+    command: heading,
+    status: hasError ? "Error" : "Success",
+    summary: details[0] ?? balances[0] ?? flow[0] ?? heading,
+    details: details.slice(1, 7),
+    balances,
+    flow,
+    txs,
+    raw,
+  };
+}
+
+function receiptCard(receipt) {
+  return `
+    <article class="receipt-card ${receipt.status === "Error" ? "is-error" : "is-success"}">
+      <div class="receipt-card-header">
+        <div>
+          <span class="receipt-command">${escapeHtml(receipt.command)}</span>
+          <h3>${escapeHtml(receipt.title)}</h3>
+        </div>
+        <span class="receipt-status">${escapeHtml(receipt.status)}</span>
+      </div>
+      <p class="receipt-summary">${escapeHtml(receipt.summary)}</p>
+      ${receipt.txs.length > 0 ? receiptSection("Transactions", receipt.txs.map((tx) => `
+        <div class="receipt-tx">
+          <span>${escapeHtml(tx.label)}</span>
+          <code>${escapeHtml(shortAddress(tx.hash))}</code>
+          <button type="button" data-copy="${escapeAttr(tx.hash)}">Copy</button>
+        </div>
+      `).join("")) : ""}
+      ${receipt.flow.length > 0 ? receiptSection("Flow", orderedLines(receipt.flow)) : ""}
+      ${receipt.balances.length > 0 ? receiptSection("Balances", plainLines(receipt.balances)) : ""}
+      ${receipt.details.length > 0 ? receiptSection("Details", plainLines(receipt.details)) : ""}
+      <details class="raw-receipt">
+        <summary>Raw output</summary>
+        <pre>${escapeHtml(receipt.raw)}</pre>
+      </details>
+    </article>
+  `;
+}
+
+function receiptSection(title, content) {
+  return `
+    <section class="receipt-section">
+      <span class="label">${escapeHtml(title)}</span>
+      ${content}
+    </section>
+  `;
+}
+
+function orderedLines(lines) {
+  return `<ol>${lines.map((line) => `<li>${escapeHtml(line.replace(/^\d+\.\s*/, "").replace(/^-\s*/, ""))}</li>`).join("")}</ol>`;
+}
+
+function plainLines(lines) {
+  return `<div class="receipt-lines">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>`;
+}
+
+function receiptTitle(heading) {
+  const lower = heading.toLowerCase();
+
+  if (lower.includes("subscribe")) return "Subscribe";
+  if (lower.includes("redeem")) return "Redeem";
+  if (lower.includes("send")) return "Transfer";
+  if (lower.includes("balance")) return "Balance";
+  if (lower.includes("policy")) return "Policy Update";
+  if (lower.includes("grant-role") || lower.includes("grant-operational-roles")) return "Role Grant";
+  if (lower.includes("manager") || lower.includes("operator")) return "Operator Action";
+  if (lower.includes("token")) return "Asset Configuration";
+  if (lower.includes("history")) return "History";
+  if (lower.includes("refresh")) return "Workspace Refresh";
+
+  return "Action";
 }
 
 function tokenOptions() {
