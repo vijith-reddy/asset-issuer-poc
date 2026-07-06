@@ -1,7 +1,7 @@
 # Project shortcuts for the USDV on Tempo POC.
 # Each target is intentionally small so a new reader can see which tool is being used.
 
-.PHONY: help env quickstart demo-start setup install foundry-deps doctor poc poc-as open-sessions print-sessions accounts-default accounts-generate typecheck build-contracts test-contracts check clean-build reset-local-state
+.PHONY: help env quickstart demo-start setup install foundry-deps doctor poc poc-as web open-sessions print-sessions accounts-default accounts-generate typecheck build-contracts test-contracts check clean-build reset-local-state
 
 POC_PROFILES ?= admin policyAdmin deployer alice bob treasury
 POC_SESSIONS ?= admin policyadmin alice bob
@@ -22,6 +22,7 @@ help:
 	@echo "Development:"
 	@echo "  make poc                   Start the future interactive CLI"
 	@echo "  make poc-as PROFILE=alice  Start the future CLI as a named profile"
+	@echo "  make web                   Start the local actor-tabs web UI"
 	@echo "  make open-sessions         Open admin, policyadmin, alice, and bob CLI sessions"
 	@echo "  make print-sessions        Print the default session commands without opening terminals"
 	@echo "  make accounts-generate NAMES=\"admin alice bob\""
@@ -69,6 +70,9 @@ poc:
 poc-as:
 	@if [ -z "$(PROFILE)" ]; then echo "Usage: make poc-as PROFILE=alice"; exit 1; fi
 	npm run poc -- --as $(PROFILE)
+
+web:
+	npm run web
 
 open-sessions:
 	zsh scripts/helpers/open-cli-sessions.sh $(POC_SESSIONS)

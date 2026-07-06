@@ -220,6 +220,52 @@ admin-subscribe bob 5 --memo bank-wire-001
 history
 ```
 
+## Play With The Web Client
+
+The web client is another local client for the same POC state. It keeps private keys on the Node side and exposes actor tabs for:
+
+```text
+admin
+manager
+alice
+bob
+```
+
+Start it:
+
+```bash
+make web
+```
+
+Then open:
+
+```text
+http://localhost:5177
+```
+
+Use the tabs to simulate each actor:
+
+- Admin creates tokens, creates policies, attaches policies, and grants manager roles.
+- Manager inspects lifecycle setup and runs admin-subscribe style flows through the admin signer.
+- Alice and Bob can view balances, subscribe, redeem, send, and inspect their local history.
+
+The web server reuses the same CLI command handlers through a small local HTTP API:
+
+```text
+GET  /api/state
+POST /api/action
+```
+
+`POST /api/action` takes an actor, a command, and command arguments:
+
+```json
+{
+  "actor": "alice",
+  "command": "send",
+  "args": ["1", "USDV", "to", "bob", "--memo", "invoice-001"]
+}
+```
+
 ## CLI API Specification
 
 The CLI is stateful. Each terminal session has:
@@ -396,6 +442,18 @@ use policy usdv-kyc
 ### Token API
 
 USDV is created through the Tempo TIP-20 factory, not by deploying an ERC-20 contract.
+
+#### `token create <symbol> [--name <name>] [--currency <currency>] [--quote <pathUSD|address>] [--admin <profile|address>] [--salt <salt>]`
+
+Create a new TIP-20 token through the Tempo TIP-20 factory.
+
+Example:
+
+```text
+token create DEMO --name DemoDollar --currency USD --quote pathUSD
+```
+
+This is the generic onboarding path used by the web client when someone wants a token other than USDV.
 
 #### `token create-usdv [--salt <salt>] [--admin <profile|address>] [--quote <pathUSD|address>]`
 
@@ -728,4 +786,4 @@ This runs:
 
 ## More Detail
 
-See [docs/implementation-log.md](docs/implementation-log.md) for the step-by-step build log and the exact testnet transaction hashes used during development.
+Local implementation notes live under `docs/implementation-log.md`. The `docs/` folder is intentionally ignored by git so development notes do not publish to the repository.

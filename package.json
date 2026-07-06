@@ -7,8 +7,9 @@
   "packageManager": "npm@11.17.0",
   "scripts": {
     "poc": "tsx cli/index.ts",
+    "web": "tsx apps/web/server.ts",
     "accounts:generate": "tsx scripts/helpers/generate-accounts.ts",
-    "typecheck": "sh -c 'if find cli scripts -name \"*.ts\" -print -quit | grep -q .; then tsc --noEmit; else echo \"No TypeScript files to check yet\"; fi'",
+    "typecheck": "sh -c 'if find cli scripts apps -name \"*.ts\" -print -quit | grep -q .; then tsc --noEmit; else echo \"No TypeScript files to check yet\"; fi'",
     "build:contracts": "forge build",
     "test:contracts": "forge test"
   },

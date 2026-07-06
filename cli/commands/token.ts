@@ -47,6 +47,11 @@ export async function handleTokenCommand(args: string[], context: ReplContext, o
     return;
   }
 
+  if (subcommand === "create") {
+    await createToken(rest, context, output);
+    return;
+  }
+
   if (subcommand === "inspect") {
     await inspectToken(rest[0] ?? "USDV", context, output);
     return;
@@ -83,6 +88,7 @@ export async function handleTokenCommand(args: string[], context: ReplContext, o
 
 function writeTokenHelp(output: Output): void {
   output.write(`Token commands:
+  token create <symbol> [--name <name>] [--currency <currency>] [--quote <pathUSD|address>] [--admin <profile|address>] [--salt <salt>]
   token create-usdv [--salt <salt>] [--admin <profile|address>] [--quote <pathUSD|address>]
   token list
   token inspect [symbol]
@@ -122,23 +128,65 @@ async function writeTokenList(context: ReplContext, output: Output): Promise<voi
 }
 
 async function createUsdv(args: string[], context: ReplContext, output: Output): Promise<void> {
-  const active = requireActiveProfile(context);
-  const tokenKey = tokenStateKey("USDV");
+  await createTip20Token({
+    symbol: "USDV",
+    name: "USDV",
+    currency: "USD",
+    quoteArg: readOption(args, "--quote") ?? "pathUSD",
+    adminArg: readOption(args, "--admin"),
+    rawSalt: readOption(args, "--salt") ?? "usdv-poc",
+    duplicateMessage: "USDV already exists in local deployment state.",
+  }, context, output);
+}
 
-  if (context.deployments.deployments[tokenKey]) {
-    throw new Error("USDV already exists in local deployment state.");
+async function createToken(args: string[], context: ReplContext, output: Output): Promise<void> {
+  const [symbol] = args;
+
+  if (!symbol) {
+    output.write("Usage: token create <symbol> [--name <name>] [--currency <currency>] [--quote <pathUSD|address>] [--admin <profile|address>] [--salt <salt>]\n");
+    output.write("Example: token create DEMO --name DemoDollar --currency USD --quote pathUSD\n");
+    return;
   }
 
-  const rawSalt = readOption(args, "--salt") ?? "usdv-poc";
-  const salt = parseSalt(rawSalt);
-  const adminArg = readOption(args, "--admin");
-  const quoteArg = readOption(args, "--quote") ?? "pathUSD";
-  const admin = adminArg ? resolveAddress(adminArg, context.accounts) : {
+  await createTip20Token({
+    symbol,
+    name: readOption(args, "--name") ?? symbol,
+    currency: readOption(args, "--currency") ?? "USD",
+    quoteArg: readOption(args, "--quote") ?? "pathUSD",
+    adminArg: readOption(args, "--admin"),
+    rawSalt: readOption(args, "--salt") ?? `${tokenStateKey(symbol)}-poc`,
+    duplicateMessage: `${symbol} already exists in local deployment state.`,
+  }, context, output);
+}
+
+async function createTip20Token(
+  params: {
+    symbol: string;
+    name: string;
+    currency: string;
+    quoteArg: string;
+    adminArg: string | undefined;
+    rawSalt: string;
+    duplicateMessage: string;
+  },
+  context: ReplContext,
+  output: Output,
+): Promise<void> {
+  const active = requireActiveProfile(context);
+  const symbol = normalizeCreatedTokenSymbol(params.symbol);
+  const tokenKey = tokenStateKey(symbol);
+
+  if (context.deployments.deployments[tokenKey]) {
+    throw new Error(params.duplicateMessage);
+  }
+
+  const salt = parseSalt(params.rawSalt);
+  const admin = params.adminArg ? resolveAddress(params.adminArg, context.accounts) : {
     label: active.name,
     address: active.address,
     isKnownProfile: true,
   };
-  const quoteToken = resolveQuoteToken(quoteArg);
+  const quoteToken = resolveQuoteToken(params.quoteArg);
   const walletClient = createTempoWalletClient(active, context.network);
   const predictedAddress = await context.publicClient.readContract({
     address: TIP20_FACTORY_ADDRESS,
@@ -151,7 +199,7 @@ async function createUsdv(args: string[], context: ReplContext, output: Output):
     address: TIP20_FACTORY_ADDRESS,
     abi: tip20FactoryAbi,
     functionName: "createToken",
-    args: ["USDV", "USDV", "USD", quoteToken, admin.address, salt],
+    args: [params.name, symbol, params.currency, quoteToken, admin.address, salt],
   });
 
   const receipt = await context.publicClient.waitForTransactionReceipt({ hash });
@@ -159,19 +207,19 @@ async function createUsdv(args: string[], context: ReplContext, output: Output):
   const createdAt = nowIso();
 
   const record: DeploymentRecord = {
-    name: "USDV",
+    name: symbol,
     address: tokenAddress,
     network: context.network.key,
     kind: "tip20",
     txHash: hash,
     createdAt,
     metadata: {
-      tokenName: "USDV",
-      symbol: "USDV",
-      currency: "USD",
+      tokenName: params.name,
+      symbol,
+      currency: params.currency,
       quoteToken,
       admin: admin.label,
-      salt: rawSalt,
+      salt: params.rawSalt,
       saltBytes32: salt,
     },
   };
@@ -180,21 +228,23 @@ async function createUsdv(args: string[], context: ReplContext, output: Output):
   context.deployments.updatedAt = createdAt;
   await context.saveDeployments(context.deployments);
   await recordHistory(context, {
-    action: "token create-usdv",
-    summary: `created USDV ${tokenAddress}`,
+    action: symbol === "USDV" ? "token create-usdv" : "token create",
+    summary: `created ${symbol} ${tokenAddress}`,
     txs: [{ label: "createToken", hash }],
     metadata: {
       token: tokenAddress,
       predicted: predictedAddress,
       quoteToken,
       admin: admin.address,
-      salt: rawSalt,
+      salt: params.rawSalt,
     },
   });
 
-  output.write(`created USDV ${tokenAddress}\n`);
+  output.write(`created ${symbol} ${tokenAddress}\n`);
   output.write(`predicted ${predictedAddress}\n`);
-  output.write(`quote ${quoteArg} ${quoteToken}\n`);
+  output.write(`name ${params.name}\n`);
+  output.write(`currency ${params.currency}\n`);
+  output.write(`quote ${params.quoteArg} ${quoteToken}\n`);
   output.write(`admin ${admin.label} ${admin.address}\n`);
   output.write(`tx: ${hash}\n`);
 }
@@ -452,6 +502,16 @@ function requireToken(symbol: string, context: ReplContext): DeploymentRecord {
 
 function tokenStateKey(symbol: string): string {
   return symbol.trim().toLowerCase();
+}
+
+function normalizeCreatedTokenSymbol(symbol: string): string {
+  const normalized = symbol.trim();
+
+  if (!/^[A-Za-z][A-Za-z0-9]{1,15}$/.test(normalized)) {
+    throw new Error("Token symbol must start with a letter and use 2-16 letters or numbers.");
+  }
+
+  return normalized.toUpperCase();
 }
 
 function parseSalt(value: string): Hash {

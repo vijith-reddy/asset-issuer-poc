@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["cli/**/*.ts", "scripts/**/*.ts"],
+  "include": ["apps/**/*.ts", "cli/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "out", "cache", "broadcast", "lib"]
 }

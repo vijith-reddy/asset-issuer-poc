@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Asset Issuer POC</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Asset Issuer POC</h1>
+          <p id="networkLine">Tempo Moderato</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="status-grid" aria-label="Workspace status">
+        <div class="status-panel">
+          <span class="label">Token</span>
+          <strong id="tokenStatus">No token</strong>
+        </div>
+        <div class="status-panel">
+          <span class="label">Policy</span>
+          <strong id="policyStatus">No policy</strong>
+        </div>
+        <div class="status-panel">
+          <span class="label">Manager</span>
+          <strong id="managerStatus">Not deployed</strong>
+        </div>
+      </section>
+
+      <nav class="actor-tabs" aria-label="Actors">
+        <button class="tab-button is-active" type="button" data-tab="admin">Admin</button>
+        <button class="tab-button" type="button" data-tab="manager">Manager</button>
+        <button class="tab-button" type="button" data-tab="alice">Alice</button>
+        <button class="tab-button" type="button" data-tab="bob">Bob</button>
+      </nav>
+
+      <section class="content-grid">
+        <section class="actor-panel" id="actorPanel"></section>
+        <aside class="output-panel" aria-label="Command output">
+          <div class="output-header">
+            <h2>Output</h2>
+            <button id="clearOutputButton" type="button">Clear</button>
+          </div>
+          <pre id="output">Ready.</pre>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
