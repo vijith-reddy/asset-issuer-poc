@@ -684,7 +684,7 @@ function wireOperatorActions() {
 }
 
 async function run(actor, command, args, label) {
-  appendOutput(`\n${label ?? `${actor}> ${[command, ...args].join(" ")}`}`);
+  const heading = label ?? `${actor}> ${[command, ...args].join(" ")}`;
 
   try {
     const response = await fetch("/api/action", {
@@ -695,15 +695,15 @@ async function run(actor, command, args, label) {
     const payload = await response.json();
 
     if (!payload.ok) {
-      appendOutput(`Error: ${payload.error ?? "Unknown error"}`);
+      appendOutput(`${heading}\nError: ${payload.error ?? "Unknown error"}`);
       return;
     }
 
-    if (payload.output) appendOutput(payload.output);
+    appendOutput(payload.output ? `${heading}\n${payload.output}` : heading);
     state = payload.state;
     render();
   } catch (error) {
-    appendOutput(`Error: ${error.message}`);
+    appendOutput(`${heading}\nError: ${error.message}`);
   }
 }
 
@@ -972,8 +972,8 @@ function renderCell(cell) {
 }
 
 function appendOutput(text) {
-  output.textContent = output.textContent === "Ready." ? text : `${output.textContent}\n${text}`;
-  output.scrollTop = output.scrollHeight;
+  output.textContent = output.textContent === "Ready." ? text.trimStart() : `${text.trimStart()}\n\n${output.textContent}`;
+  output.scrollTop = 0;
 }
 
 function tokenOptions() {
