@@ -11,27 +11,48 @@ export interface ManagerArtifact {
 
 const MANAGER_ARTIFACT_PATH = "out/MultiAssetLifecycleManager.sol/MultiAssetLifecycleManager.json";
 const LEGACY_MANAGER_ARTIFACT_PATH = "out/MockUSDVLifecycleManager.sol/MockUSDVLifecycleManager.json";
+const MANAGER_RUNTIME_ARTIFACT_PATH = "artifacts/MultiAssetLifecycleManager.json";
+const LEGACY_MANAGER_RUNTIME_ARTIFACT_PATH = "artifacts/MockUSDVLifecycleManager.json";
 
 export async function loadManagerArtifact(rootDir = process.cwd()): Promise<ManagerArtifact> {
-  return loadArtifact(MANAGER_ARTIFACT_PATH, "Manager artifact not found. Run make build-contracts first.", rootDir);
+  return loadArtifact(
+    [MANAGER_ARTIFACT_PATH, MANAGER_RUNTIME_ARTIFACT_PATH],
+    "Manager artifact not found. Run make build-contracts first.",
+    rootDir,
+  );
 }
 
 export async function loadLegacyManagerArtifact(rootDir = process.cwd()): Promise<ManagerArtifact> {
-  return loadArtifact(LEGACY_MANAGER_ARTIFACT_PATH, "Legacy manager artifact not found. Run make build-contracts first.", rootDir);
+  return loadArtifact(
+    [LEGACY_MANAGER_ARTIFACT_PATH, LEGACY_MANAGER_RUNTIME_ARTIFACT_PATH],
+    "Legacy manager artifact not found. Run make build-contracts first.",
+    rootDir,
+  );
 }
 
-async function loadArtifact(path: string, missingMessage: string, rootDir: string): Promise<ManagerArtifact> {
-  const artifactPath = join(rootDir, path);
+async function loadArtifact(paths: string[], missingMessage: string, rootDir: string): Promise<ManagerArtifact> {
+  let lastMissingError: unknown;
 
-  try {
-    return JSON.parse(await readFile(artifactPath, "utf8")) as ManagerArtifact;
-  } catch (error) {
-    if (isMissingFile(error)) {
-      throw new Error(missingMessage);
+  for (const path of paths) {
+    const artifactPath = join(rootDir, path);
+
+    try {
+      return JSON.parse(await readFile(artifactPath, "utf8")) as ManagerArtifact;
+    } catch (error) {
+      if (isMissingFile(error)) {
+        lastMissingError = error;
+        continue;
+      }
+
+      throw error;
     }
-
-    throw error;
   }
+
+  if (lastMissingError) {
+    throw new Error(missingMessage);
+  }
+
+  throw new Error(missingMessage);
 }
 
 function isMissingFile(error: unknown): boolean {

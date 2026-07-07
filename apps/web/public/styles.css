@@ -123,6 +123,20 @@ code,
   flex-wrap: wrap;
 }
 
+.session-pill {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .asset-picker-shell {
   width: min(420px, 42vw);
   min-width: 320px;

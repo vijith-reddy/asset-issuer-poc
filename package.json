@@ -11,7 +11,8 @@
     "accounts:generate": "tsx scripts/helpers/generate-accounts.ts",
     "typecheck": "sh -c 'if find cli scripts apps -name \"*.ts\" -print -quit | grep -q .; then tsc --noEmit; else echo \"No TypeScript files to check yet\"; fi'",
     "build:contracts": "forge build",
-    "test:contracts": "forge test"
+    "test:contracts": "forge test",
+    "vercel:build": "npm run typecheck"
   },
   "dependencies": {
     "commander": "^15.0.0",

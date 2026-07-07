@@ -16,8 +16,10 @@ let tokenSaltDraft = randomSaltHex();
 const output = document.querySelector("#output");
 const workspacePanel = document.querySelector("#workspacePanel");
 const refreshButton = document.querySelector("#refreshButton");
+const resetProjectButton = document.querySelector("#resetProjectButton");
 const clearOutputButton = document.querySelector("#clearOutputButton");
 const assetPickerShell = document.querySelector("#assetPickerShell");
+const sessionLine = document.querySelector("#sessionLine");
 
 document.querySelectorAll(".nav-button").forEach((button) => {
   button.addEventListener("click", () => {
@@ -28,6 +30,36 @@ document.querySelectorAll(".nav-button").forEach((button) => {
 refreshButton.addEventListener("click", async () => {
   await refreshState();
   appendOutput("workspace refreshed");
+});
+
+resetProjectButton.addEventListener("click", async () => {
+  if (actionInFlight) return;
+  if (!window.confirm("Reset this demo project? This deletes session keys and app state. Existing testnet contracts remain onchain but this session will forget them.")) {
+    return;
+  }
+
+  try {
+    setBusy(true, "reset project");
+    const response = await fetch("/api/session/reset", { method: "POST" });
+    const payload = await response.json();
+
+    if (!payload.ok) {
+      appendOutput(`project> reset\nError: ${payload.error ?? "Reset failed"}`);
+      return;
+    }
+
+    state = payload.state;
+    activeTokenName = "";
+    previewPolicyName = "";
+    policyEditName = "";
+    ensureActiveToken();
+    render();
+    appendOutput("project> reset\nDemo project reset. New actor keys and empty app state are ready.");
+  } catch (error) {
+    appendOutput(`project> reset\nError: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
 });
 
 clearOutputButton.addEventListener("click", () => {
@@ -72,6 +104,7 @@ async function refreshState() {
 
 function render() {
   renderStatus();
+  renderSessionStatus();
   renderAssetPicker();
 
   if (activeView === "overview") renderAssetOverview();
@@ -80,6 +113,23 @@ function render() {
   if (activeView === "operator") renderOperator();
   if (activeView === "investors") renderInvestors();
   if (activeView === "activity") renderActivity();
+}
+
+function renderSessionStatus() {
+  const session = state?.session;
+
+  if (!sessionLine || !session) return;
+
+  if (!session.hosted) {
+    sessionLine.textContent = "Local demo";
+    resetProjectButton.hidden = true;
+    return;
+  }
+
+  resetProjectButton.hidden = false;
+  sessionLine.textContent = session.expiresAt
+    ? `Hosted demo expires ${formatRelativeExpiry(session.expiresAt)}`
+    : "Hosted demo";
 }
 
 function renderStatus() {
@@ -1277,6 +1327,7 @@ function setBusy(isBusy, label = "") {
   });
 
   refreshButton.disabled = isBusy;
+  resetProjectButton.disabled = isBusy;
 
   if (isBusy) {
     document.body.dataset.busyLabel = label;
@@ -2461,6 +2512,23 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatRelativeExpiry(value) {
+  const ms = new Date(value).getTime() - Date.now();
+
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return "soon";
+  }
+
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.max(1, Math.round((ms % 3_600_000) / 60_000));
+
+  if (hours <= 0) {
+    return `in ${minutes}m`;
+  }
+
+  return `in ${hours}h ${minutes}m`;
 }
 
 function capitalize(value) {

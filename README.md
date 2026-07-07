@@ -224,7 +224,7 @@ history
 
 ## Play With The Web Client
 
-The web client is another local client for the same POC state. It keeps private keys on the Node side and presents an issuer-console workflow:
+The web client is another client for the same POC command handlers. It keeps demo actor keys on the Node side and presents an issuer-console workflow:
 
 ```text
 Overview
@@ -274,6 +274,32 @@ POST /api/action
   "args": ["1", "USDV", "to", "bob", "--memo", "invoice-001"]
 }
 ```
+
+### Hosted Vercel Mode
+
+When `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set, the web app switches from local `.poc` files to hosted demo sessions.
+
+Hosted sessions work like this:
+
+- a fresh session id is stored in an HTTP-only cookie;
+- admin, alice, bob, deployer, policyAdmin, and treasury keys are generated for that session;
+- accounts, deployments, policies, actor sessions, and history are stored in Redis;
+- every write refreshes the TTL;
+- default TTL is 12 hours;
+- `Reset Project` deletes the hosted session and starts over with new keys and empty app state.
+
+Required Vercel env vars:
+
+```text
+TEMPO_TESTNET_RPC_URL=https://rpc.moderato.tempo.xyz
+TEMPO_FEE_TOKEN=0x20c0000000000000000000000000000000000000
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
+POC_SESSION_TTL_SECONDS=43200
+POC_HOSTED_AUTO_FAUCET=true
+```
+
+The reset only deletes app session state. Tempo testnet contracts, tokens, and policies already created onchain remain onchain but are forgotten by the new session.
 
 ## CLI API Specification
 
