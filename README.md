@@ -5,7 +5,7 @@ This project is a testnet-only CLI proof of concept for issuing and operating a 
 It uses:
 
 - Tempo Moderato testnet
-- TIP-20 factory for USDV creation
+- TIP-20 factory for asset creation
 - TIP-403 for whitelist policy enforcement
 - Foundry for Solidity contract build/deploy artifacts
 - TypeScript + Viem for the interactive CLI
@@ -19,14 +19,14 @@ The POC separates token configuration, policy administration, and lifecycle exec
 ```text
 admin
   TIP-20 token admin / governance profile.
-  Creates USDV, attaches a TIP-403 policy id to USDV, and grants/revokes TIP-20 roles.
+  Creates TIP-20 assets, attaches TIP-403 policy ids, and grants/revokes TIP-20 roles.
 
 policyAdmin
   TIP-403 policy owner/operator profile when assigned as policy admin.
   Edits whitelist/blacklist membership for a policy id.
 
 manager
-  Smart contract that receives operational TIP-20 roles.
+  Reusable smart contract that receives operational TIP-20 roles.
   Executes subscribe, redeem, and admin-subscribe flows.
 
 alice/bob
@@ -141,7 +141,8 @@ token create-usdv
 token set-policy USDV usdv-kyc
 
 manager deploy
-manager grant-operational-roles
+manager register-route USDV
+manager grant-operational-roles --asset USDV
 manager allow-policy usdv-kyc
 manager faucet
 ```
@@ -152,7 +153,8 @@ At this point:
 - USDV uses the `usdv-kyc` TIP-403 whitelist.
 - Alice and Bob are allowed.
 - Treasury is not allowed.
-- The lifecycle manager has the TIP-20 operational roles used by this POC.
+- The reusable lifecycle manager has a USDV route.
+- The manager has the USDV TIP-20 operational roles used by this POC.
 - The manager has pathUSD reserves for redemption tests.
 
 ## Play With The CLI
@@ -226,11 +228,10 @@ The web client is another local client for the same POC state. It keeps private 
 
 ```text
 Overview
-Asset Admin
-Compliance
+Policy
+Roles
 Operator
 Investors
-Simulation
 Activity
 ```
 
@@ -246,15 +247,16 @@ Then open:
 http://localhost:5177
 ```
 
-The main tabs use asset-issuer language:
+The main tabs are scoped to the active asset selected in the top bar:
 
-- Overview shows operational readiness and recent receipts.
-- Asset Admin creates TIP-20 asset tokens, attaches policies, and grants roles.
-- Compliance shows TIP-403 policies as a visual rule set and JSON document.
-- Operator shows lifecycle readiness, reserves, and issuance actions.
-- Investors manages eligibility and balances.
-- Simulation lets you act as Alice or Bob without making actors the main UX.
+- Overview shows the asset setup checklist and token creation.
+- Policy attaches TIP-403 rules and shows policy documents.
+- Roles grants or revokes TIP-20 roles for the selected asset.
+- Operator shows lifecycle readiness, reserves, and issuance actions for the selected asset route.
+- Investors shows Alice/Bob access, balances, transfers, and supported subscribe/redeem actions.
 - Activity aggregates local CLI and web receipts.
+
+New TIP-20 assets start with factory defaults. To use subscribe/redeem for a new asset, attach a TIP-403 policy, register an operator route for that asset, grant the operator role bundle on that token, and allow the operator in the attached policy.
 
 The web server reuses the same CLI command handlers through a small local HTTP API:
 
@@ -454,6 +456,8 @@ USDV is created through the Tempo TIP-20 factory, not by deploying an ERC-20 con
 
 Create a new TIP-20 token through the Tempo TIP-20 factory.
 
+If `--salt` is omitted, the CLI generates a random 32-byte salt to avoid factory address collisions. Pass `--salt` only when you intentionally want a deterministic predicted address.
+
 Example:
 
 ```text
@@ -461,6 +465,8 @@ token create DEMO --name DemoDollar --currency USD --quote pathUSD
 ```
 
 This is the generic onboarding path used by the web client when someone wants a token other than USDV.
+
+New TIP-20 tokens start with the factory default transfer policy, `always-allow #1`. Attach a TIP-403 policy with `token set-policy <symbol> <policy-name>` when you want the token to use the demo compliance rules.
 
 #### `token create-usdv [--salt <salt>] [--admin <profile|address>] [--quote <pathUSD|address>]`
 
@@ -472,7 +478,7 @@ Defaults:
 - symbol: `USDV`
 - currency: `USD`
 - quote token: `pathUSD`
-- salt: `usdv-poc`
+- salt: random 32-byte value when `--salt` is omitted
 - admin: active profile
 
 Side effects:
@@ -559,23 +565,39 @@ token revoke-role USDV alice issuer
 
 ### Manager API
 
-The manager models the issuer lifecycle around USDV.
+The manager models issuer lifecycle actions through a reusable multi-asset operator.
 
-#### `manager deploy [--admin <profile|address>]`
+#### `manager deploy [--admin <profile|address>] [--replace]`
 
-Deploy `MockUSDVLifecycleManager`.
+Deploy `MultiAssetLifecycleManager`.
 
-Constructor inputs:
+Use `--replace` when local state still points at the older USDV-only mock manager. The old local record is archived and the new reusable operator becomes `manager`.
 
-- USDV address
-- pathUSD settlement token
+Constructor input:
+
 - admin address
 
-#### `manager grant-issuer`
+#### `manager register-route [symbol] [--settlement <pathUSD|address>]`
 
-Grant USDV `ISSUER_ROLE` to the manager.
+Register an asset route on the reusable manager.
 
-#### `manager grant-operational-roles`
+Example:
+
+```text
+manager register-route VUSDTEST
+```
+
+The route tells the operator which TIP-20 asset it can issue/redeem and which settlement token backs the flow. The default settlement token is pathUSD.
+
+#### `manager routes`
+
+List locally known asset routes for the reusable manager.
+
+#### `manager grant-issuer [--asset <symbol>]`
+
+Grant one asset's `ISSUER_ROLE` to the manager.
+
+#### `manager grant-operational-roles [--asset <symbol>]`
 
 Grant the manager contract the full TIP-20 role bundle this POC uses:
 
@@ -588,44 +610,51 @@ unpause
 
 This is the preferred bootstrap command for the POC because the manager contract should stay the operational holder of mint/burn lifecycle authority.
 
+Example:
+
+```text
+manager grant-operational-roles --asset VUSDTEST
+```
+
 #### `manager allow-policy [policy-name]`
 
-Authorize the manager in the USDV TIP-403 policy.
+Authorize the manager in a TIP-403 policy.
 
-For a whitelist, this adds the manager to the whitelist. This matters because redemptions move USDV into the manager before burning.
+For a whitelist, this adds the manager to the whitelist. This matters because lifecycle flows can move the asset into or out of the manager contract.
 
 #### `manager faucet`
 
 Fund the manager with testnet pathUSD. This provides redemption reserves.
 
-#### `manager subscribe <amount> [--min <amount>] [--trace|--no-trace]`
+#### `manager subscribe <amount> [--asset <symbol>] [--min <amount>] [--trace|--no-trace]`
 
-Subscribe pathUSD into USDV.
+Subscribe pathUSD into the selected asset. `--asset` defaults to USDV.
 
 Flow:
 
 1. Approve manager to spend pathUSD.
 2. Call manager `subscribe`.
 3. Manager pulls pathUSD.
-4. Manager calls USDV `mintWithMemo`.
+4. Manager calls asset `mintWithMemo`.
 5. Mint succeeds because the manager has the required TIP-20 issuer role.
 
 Alias:
 
 ```text
 subscribe 10
+subscribe 10 --asset VUSDTEST
 ```
 
-#### `manager redeem <amount> [--min <amount>] [--trace|--no-trace]`
+#### `manager redeem <amount> [--asset <symbol>] [--min <amount>] [--trace|--no-trace]`
 
-Redeem USDV back to pathUSD.
+Redeem the selected asset back to pathUSD. `--asset` defaults to USDV.
 
 Flow:
 
-1. Approve manager to spend USDV.
+1. Approve manager to spend the selected asset.
 2. Call manager `redeem`.
-3. Manager pulls USDV.
-4. Manager calls USDV `burnWithMemo`.
+3. Manager pulls the selected asset.
+4. Manager calls asset `burnWithMemo`.
 5. Manager returns pathUSD.
 6. Burn succeeds because the manager is the operational lifecycle contract.
 
@@ -633,9 +662,10 @@ Alias:
 
 ```text
 redeem 2
+redeem 2 --asset VUSDTEST
 ```
 
-#### `manager admin-subscribe <recipient> <amount> [--min <amount>] [--memo <text>] [--trace|--no-trace]`
+#### `manager admin-subscribe <recipient> <amount> [--asset <symbol>] [--min <amount>] [--memo <text>] [--trace|--no-trace]`
 
 Admin-only mint path for offchain settlement demos.
 
@@ -643,11 +673,12 @@ Alias:
 
 ```text
 admin-subscribe bob 5 --memo bank-wire-001
+admin-subscribe bob 5 --asset VUSDTEST --memo bank-wire-001
 ```
 
 ### Payment API
 
-#### `balance [profile|address] [USDV|pathUSD|all]`
+#### `balance [profile|address] [symbol|pathUSD|all]`
 
 Read onchain balances.
 
@@ -657,10 +688,11 @@ Examples:
 balance
 balance bob
 balance bob USDV
+balance bob VUSDTEST
 balance pathUSD
 ```
 
-#### `send <amount> <USDV|pathUSD> to <profile|address> [--memo <text>]`
+#### `send <amount> <symbol|pathUSD> to <profile|address> [--memo <text>]`
 
 Send a TIP-20 payment with a 32-byte memo.
 
@@ -668,6 +700,7 @@ Example:
 
 ```text
 send 1 USDV to bob --memo invoice-001
+send 1 VUSDTEST to bob --memo invoice-001
 ```
 
 Flow:

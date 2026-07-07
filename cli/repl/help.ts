@@ -9,15 +9,16 @@ export const REPL_HELP = `Available commands:
   use policy usdv-kyc
               Select the active TIP-403 policy for this session
   whoami      Show the active profile address
-  balance     Show USDV and pathUSD balances for the active profile
+  balance     Show TIP-20 and pathUSD balances for the active profile
   balance bob Show balances for another profile or address
   send 3 USDV to bob [--memo id]
               Send a TIP-20 payment with a 32-byte memo
-  subscribe 10
-              Subscribe pathUSD into USDV through the manager
+  subscribe 10 [--asset USDV]
+              Subscribe pathUSD into an asset through the manager
               Add --no-trace for a quiet one-off command
-  redeem 2    Redeem USDV back to pathUSD through the manager
-  admin-subscribe bob 5
+  redeem 2 [--asset USDV]
+              Redeem an asset back to pathUSD through the manager
+  admin-subscribe bob 5 [--asset USDV]
               Admin-only manager subscription for offchain settlement demos
   history     Show recent transaction history for this session
   receipt     Show the last history entry in detail

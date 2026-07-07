@@ -15,6 +15,7 @@
           <p id="networkLine">Loading workspace</p>
         </div>
         <div class="topbar-actions">
+          <div class="asset-picker-shell" id="assetPickerShell"></div>
           <button id="refreshButton" type="button">Refresh</button>
         </div>
       </header>
@@ -25,7 +26,7 @@
           <strong id="tokenStatus">No asset token</strong>
         </div>
         <div class="status-panel">
-          <span class="label">Compliance</span>
+          <span class="label">Policy</span>
           <strong id="policyStatus">No policy attached</strong>
         </div>
         <div class="status-panel">
@@ -39,9 +40,11 @@
       </section>
 
       <nav class="primary-nav" aria-label="Issuer sections">
-        <button class="nav-button is-active" type="button" data-view="admin">Admin</button>
+        <button class="nav-button is-active" type="button" data-view="overview">Overview</button>
+        <button class="nav-button" type="button" data-view="policy">Policy</button>
+        <button class="nav-button" type="button" data-view="roles">Roles</button>
         <button class="nav-button" type="button" data-view="operator">Operator</button>
-        <button class="nav-button" type="button" data-view="users">Users</button>
+        <button class="nav-button" type="button" data-view="investors">Investors</button>
         <button class="nav-button" type="button" data-view="activity">Activity</button>
       </nav>
 
@@ -52,6 +55,7 @@
             <div>
               <span class="label">Execution Feed</span>
               <h2>Latest receipts</h2>
+              <p>Newest first</p>
             </div>
             <button id="clearOutputButton" type="button">Clear</button>
           </div>

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { getAddress, isAddress, keccak256, parseEventLogs, toBytes, type Hash, type Hex, type Log } from "viem";
 import { resolveAddress } from "../utils/address-book.js";
 import {
@@ -134,7 +135,7 @@ async function createUsdv(args: string[], context: ReplContext, output: Output):
     currency: "USD",
     quoteArg: readOption(args, "--quote") ?? "pathUSD",
     adminArg: readOption(args, "--admin"),
-    rawSalt: readOption(args, "--salt") ?? "usdv-poc",
+    rawSalt: readOption(args, "--salt") ?? randomSalt(),
     duplicateMessage: "USDV already exists in local deployment state.",
   }, context, output);
 }
@@ -154,7 +155,7 @@ async function createToken(args: string[], context: ReplContext, output: Output)
     currency: readOption(args, "--currency") ?? "USD",
     quoteArg: readOption(args, "--quote") ?? "pathUSD",
     adminArg: readOption(args, "--admin"),
-    rawSalt: readOption(args, "--salt") ?? `${tokenStateKey(symbol)}-poc`,
+    rawSalt: readOption(args, "--salt") ?? randomSalt(),
     duplicateMessage: `${symbol} already exists in local deployment state.`,
   }, context, output);
 }
@@ -221,6 +222,8 @@ async function createTip20Token(
       admin: admin.label,
       salt: params.rawSalt,
       saltBytes32: salt,
+      transferPolicy: "always-allow",
+      transferPolicyId: "1",
     },
   };
 
@@ -525,6 +528,10 @@ function parseSalt(value: string): Hash {
 
   // Hashing a readable salt gives the factory a fixed bytes32 value without length limits.
   return keccak256(toBytes(value));
+}
+
+function randomSalt(): Hash {
+  return `0x${randomBytes(32).toString("hex")}`;
 }
 
 function resolveQuoteToken(value: string): Address {

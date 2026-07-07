@@ -9,16 +9,25 @@ export interface ManagerArtifact {
   };
 }
 
-const MANAGER_ARTIFACT_PATH = "out/MockUSDVLifecycleManager.sol/MockUSDVLifecycleManager.json";
+const MANAGER_ARTIFACT_PATH = "out/MultiAssetLifecycleManager.sol/MultiAssetLifecycleManager.json";
+const LEGACY_MANAGER_ARTIFACT_PATH = "out/MockUSDVLifecycleManager.sol/MockUSDVLifecycleManager.json";
 
 export async function loadManagerArtifact(rootDir = process.cwd()): Promise<ManagerArtifact> {
-  const artifactPath = join(rootDir, MANAGER_ARTIFACT_PATH);
+  return loadArtifact(MANAGER_ARTIFACT_PATH, "Manager artifact not found. Run make build-contracts first.", rootDir);
+}
+
+export async function loadLegacyManagerArtifact(rootDir = process.cwd()): Promise<ManagerArtifact> {
+  return loadArtifact(LEGACY_MANAGER_ARTIFACT_PATH, "Legacy manager artifact not found. Run make build-contracts first.", rootDir);
+}
+
+async function loadArtifact(path: string, missingMessage: string, rootDir: string): Promise<ManagerArtifact> {
+  const artifactPath = join(rootDir, path);
 
   try {
     return JSON.parse(await readFile(artifactPath, "utf8")) as ManagerArtifact;
   } catch (error) {
     if (isMissingFile(error)) {
-      throw new Error("Manager artifact not found. Run make build-contracts first.");
+      throw new Error(missingMessage);
     }
 
     throw error;

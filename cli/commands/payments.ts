@@ -7,12 +7,12 @@ import {
   TESTNET_TIP20_TOKENS,
   tip20Abi,
 } from "../tempo/index.js";
-import type { AccountProfile, DeploymentRecord } from "../state/index.js";
+import type { AccountProfile } from "../state/index.js";
 import type { ReplContext } from "../repl/context.js";
 import { recordHistory } from "./history.js";
 
 type Output = Pick<NodeJS.WritableStream, "write">;
-type KnownTokenSymbol = "USDV" | "pathUSD";
+type KnownTokenSymbol = string;
 
 interface ResolvedToken {
   symbol: KnownTokenSymbol;
@@ -27,10 +27,11 @@ interface MemoResult {
 
 export async function handleBalanceCommand(args: string[], context: ReplContext, output: Output): Promise<void> {
   const firstArg = args[0];
-  const target = firstArg && !isKnownToken(firstArg)
+  const firstArgIsToken = firstArg ? isKnownToken(firstArg, context) : false;
+  const target = firstArg && !firstArgIsToken
     ? resolveAddress(firstArg, context.accounts)
     : activeProfileAsResolvedAddress(context.activeProfile);
-  const tokenArg = firstArg && isKnownToken(firstArg) ? firstArg : args[1];
+  const tokenArg = firstArg && firstArgIsToken ? firstArg : args[1];
   const tokens = resolveBalanceTokens(tokenArg, context);
 
   output.write(`balances for ${target.label} ${target.address}\n`);
@@ -165,7 +166,7 @@ function parseSendArgs(args: string[]): { amount: string; symbol: string; recipi
 
   if (!args[0] || !args[1] || toIndex !== 2 || !recipient) {
     throw new Error([
-      "Usage: send <amount> <USDV|pathUSD> to <profile|address> [--memo <text>]",
+      "Usage: send <amount> <symbol|pathUSD> to <profile|address> [--memo <text>]",
       "Example: send 3 USDV to bob --memo invoice-001",
     ].join("\n"));
   }
@@ -190,21 +191,18 @@ function resolveBalanceTokens(tokenArg: string | undefined, context: ReplContext
   }
 
   return [
-    resolveToken("USDV", context),
+    ...Object.values(context.deployments.deployments)
+      .filter((deployment) => deployment.kind === "tip20")
+      .map((deployment) => ({
+        symbol: deployment.name,
+        address: deployment.address,
+      })),
     resolveToken("pathUSD", context),
   ];
 }
 
 function resolveToken(value: string, context: ReplContext): ResolvedToken {
   const normalized = normalizeTokenSymbol(value);
-
-  if (normalized === "USDV") {
-    const token = requireTokenDeployment("USDV", context);
-    return {
-      symbol: "USDV",
-      address: token.address,
-    };
-  }
 
   if (normalized === "pathUSD") {
     return {
@@ -213,7 +211,16 @@ function resolveToken(value: string, context: ReplContext): ResolvedToken {
     };
   }
 
-  throw new Error(`Unknown token: ${value}. Use USDV or pathUSD.`);
+  const token = context.deployments.deployments[value.trim().toLowerCase()];
+
+  if (token?.kind === "tip20") {
+    return {
+      symbol: token.name,
+      address: token.address,
+    };
+  }
+
+  throw new Error(`Unknown token: ${value}. Run: token list`);
 }
 
 function normalizeTokenSymbol(value: string): KnownTokenSymbol | undefined {
@@ -230,22 +237,12 @@ function normalizeTokenSymbol(value: string): KnownTokenSymbol | undefined {
   return undefined;
 }
 
-function isKnownToken(value: string): boolean {
-  return normalizeTokenSymbol(value) !== undefined;
-}
-
-function requireTokenDeployment(symbol: "USDV", context: ReplContext): DeploymentRecord {
-  const token = context.deployments.deployments[symbol.toLowerCase()];
-
-  if (!token || token.kind !== "tip20") {
-    throw new Error([
-      `Missing ${symbol} deployment.`,
-      "Run: token create-usdv",
-      "Then attach a policy with: token set-policy USDV <policy-name>",
-    ].join("\n"));
+function isKnownToken(value: string, context: ReplContext): boolean {
+  if (normalizeTokenSymbol(value) === "pathUSD") {
+    return true;
   }
 
-  return token;
+  return context.deployments.deployments[value.trim().toLowerCase()]?.kind === "tip20";
 }
 
 function createTransferMemo(input: string | undefined): MemoResult {
